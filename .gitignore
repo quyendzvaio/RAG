@@ -2,3 +2,4 @@
 *.html
 *.faiss
 *.pkl
+.__pycache__/
