@@ -1,0 +1,9 @@
+#"from rag.embeddings import get_embedding_model; from rag.vector_store import create_faiss_vectorstore; create_faiss_vectorstore(get_embedding_model())"
+gradio
+langchain
+bs4
+sentence-transformers
+faiss-cpu
+huggingface_hub
+python-dotenv
+openai
