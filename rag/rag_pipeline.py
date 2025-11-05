@@ -32,7 +32,7 @@ def build_gradio_interface():
         fn=query_interface,
         inputs=gr.Textbox(label="Nhập câu hỏi pháp lý"),
         outputs=gr.Textbox(label="Trả lời từ GPT-3.5"),
-        title="Hỏi Đáp Luật Việt Nam bằng",
+        title="Hỏi Đáp Luật Việt Nam",
         description="Hệ thống tìm kiếm tài liệu pháp luật và sinh câu trả lời tự động bằng GPT-3.5"
     )
     return iface
