@@ -1,5 +1,54 @@
-*.env
-*.html
+# ==========================================
+# Python project ignore list
+# ==========================================
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.env/
+.venv/
+env/
+venv/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# ==========================================
+# Project-specific ignores
+# ==========================================
+
+# FAISS and pickle indexes (too large for GitHub)
+faiss_index/
 *.faiss
 *.pkl
-.__pycache__/
+
+# Data or model folders
+data/
+datasets/
+models/
+outputs/
+cache/
+results/
+
+# IDE and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ==========================================
+# End of .gitignore
+# ==========================================
