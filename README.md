@@ -1,248 +1,159 @@
-# Structure-aware Hybrid RAG cho du lieu phap luat
+# Legal RAG Compare System
 
-Du an nay xu ly HTML phap luat theo cau truc Dieu/Chuong, sau do truy xuat bang:
+Du an nay xay dung he thong RAG cho du lieu phap luat Viet Nam. Muc tieu la so sanh song song hai cach truy xuat:
 
+- Vector RAG: Structure-aware Hybrid RAG voi BM25 + FAISS vector search + reranking.
+- Wiki RAG: Truy xuat tren lop Markdown wiki/raw-source da chuan hoa tu HTML phap luat.
+
+He thong duoc tach theo kien truc microservice de moi service co database/index rieng, de benchmark chat luong cau tra loi, latency, citation va cac metric danh gia RAG.
+
+## Kien Truc
+
+```text
+Frontend / UI
+    |
+API Gateway
+    |-- vector-rag-service
+    |-- wiki-rag-service
+    |-- evaluator-service
+    |-- llm-service
+```
+
+Thanh phan chinh:
+
+- `api-gateway`: UI compare mode va cac API `/ask/compare`, `/ask/vector`, `/ask/wiki`.
+- `vector-rag-service`: BM25 + FAISS + reranking tren chunk phap ly co cau truc.
+- `wiki-rag-service`: truy xuat tu Markdown wiki/raw-source va SQLite DB rieng.
+- `llm-service`: adapter goi DeepSeek API.
+- `evaluator-service`: luu logs va tinh metrics danh gia RAG.
+
+## Cong Nghe Su Dung
+
+- Python 3.10
+- FastAPI + Uvicorn cho microservices
+- Gradio cho UI compare mode
+- FAISS cho vector search
 - BM25 lexical search
-- FAISS vector search
-- Reranking tren tap ung vien hop nhat
+- Sentence Transformers cho embedding tieng Viet
+- DeepSeek API cho answer synthesis
+- SQLite cho wiki DB va evaluation logs
+- Docker Compose cho dong goi va chay he thong
 
-## Cai dependency
-
-```bash
-python3 -m pip install -r requirements.txt
-```
-
-## Cau hinh .env va DeepSeek
-
-Tao file `.env` tu template:
-
-```bash
-cp .env.example .env
-```
-
-Sua `.env` va dien API key:
-
-```env
-DEEPSEEK_API_KEY=sk-...
-DEEPSEEK_BASE_URL=https://api.deepseek.com
-DEEPSEEK_MODEL=deepseek-chat
-```
-
-Kiem tra app da nhan cau hinh chua:
-
-```bash
-python3 check_env.py
-```
-
-Lenh nay chi in trang thai `configured`, khong in API key. Hien tai UI van dang tra ket qua retrieval; cau hinh DeepSeek duoc chuan bi san cho buoc them generation/answer synthesis.
-
-`sentence-transformers` la tuy chon nhung nen dung cho chat luong semantic tot:
-
-```bash
-python3 -m pip install sentence-transformers
-```
-
-Embedding mac dinh cho tieng Viet:
+Embedding mac dinh:
 
 ```text
 bkai-foundation-models/vietnamese-bi-encoder
 ```
 
-Model nay phu hop hon model multilingual MiniLM cu cho du lieu tieng Viet/phap ly. Co the doi nhanh bang `EMBEDDING_PROFILE`:
+Mac dinh he thong chay CPU-only de phu hop may 16GB RAM va GPU doi cu.
+
+## Danh Gia Hai Phuong Phap
+
+He thong co `evaluator-service` de ghi lai tung lan compare va tinh metric cho ca `vector-rag-service` va `wiki-rag-service`. Metrics duoc hien thi trong UI compare mode va luu vao SQLite DB rieng.
+
+Bang metric hien tai:
+
+| Metric | Y nghia |
+| --- | --- |
+| `vector_latency_ms`, `wiki_latency_ms` | Thoi gian xu ly cua tung service. |
+| `vector_context_count`, `wiki_context_count` | So context truy xuat duoc. |
+| `vector_citation_count`, `wiki_citation_count` | So citation/can cu phap ly tra ve. |
+| `vector_question_context_overlap`, `wiki_question_context_overlap` | Do phu lexical giua cau hoi va context, dung lam proxy cho retrieval relevance. |
+| `vector_question_answer_overlap`, `wiki_question_answer_overlap` | Do phu lexical giua cau hoi va cau tra loi, dung lam proxy cho answer relevance. |
+| `vector_error`, `wiki_error` | 0 neu service thanh cong, 1 neu co loi. |
+| `latency_delta_ms_vector_minus_wiki` | Gia tri duong neu Vector RAG cham hon Wiki RAG, am neu Vector RAG nhanh hon. |
+
+Ket qua benchmark gan nhat tren CPU 16GB RAM, `top_k=2`, `candidate_k=20`:
+
+| Che do | Tong thoi gian | Vector RAG | Wiki RAG | Loi |
+| --- | ---: | ---: | ---: | --- |
+| Retrieval-only | ~484 ms | ~436 ms | ~230 ms | Khong |
+| Retrieval + DeepSeek LLM | ~3.47 s | ~2.81 s | ~3.42 s | Khong |
+
+Nhan xet:
+
+- Vector RAG phu hop khi can semantic search tren cac cach dien dat khac nhau.
+- Wiki RAG nhanh va de trace hon khi cau hoi gan voi tu khoa/dieu khoan trong van ban.
+- Compare mode giup chay hai phuong phap song song tren cung mot cau hoi de doi chieu latency, context, citation va chat luong cau tra loi.
+
+## Cau Truc Du Lieu
+
+- `data_raw/`: HTML phap luat goc, la source of truth.
+- `wiki_data/raw_sources/`: Markdown/raw-source sinh tu `data_raw`.
+- Docker volumes:
+  - `vector_faiss_index`: FAISS index.
+  - `vector_hybrid_index`: BM25 index va manifest.
+  - `wiki_db`: SQLite DB cho wiki service.
+  - `eval_data`: logs va metrics.
+  - `model_cache`: cache model embedding.
+
+Du lieu raw va index khong duoc copy vao Docker image. Chung duoc mount hoac luu trong Docker volumes.
+
+## Cai Dat
+
+Tao file `.env`:
 
 ```bash
-EMBEDDING_PROFILE=vietnamese python3 create_faiss.py
-EMBEDDING_PROFILE=bge-m3 python3 create_faiss.py
-EMBEDDING_PROFILE=multilingual-e5-base python3 create_faiss.py
+cp .env.example .env
 ```
 
-Luu y: moi lan doi embedding model/profile, can build lai `faiss_index/` va `hybrid_index/`.
+Sua `.env` va dien API key DeepSeek:
 
-## Chuan hoa data_raw cho wiki-service
+```env
+DEEPSEEK_API_KEY=sk-your-deepseek-api-key
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+DEEPSEEK_MODEL=deepseek-chat
+```
 
-HTML goc trong `data_raw/` la source of truth va khong bi sua. De wiki-service ingest on dinh hon, tao lop normalized raw sources:
+Kiem tra cau hinh:
 
 ```bash
-make prepare-wiki-sources
+python3 check_env.py
 ```
 
-Lenh nay sinh:
-
-```text
-wiki_data/raw_sources/
-  index.md
-  manifest.json
-  articles.jsonl
-  sources/*.md
-```
-
-Y nghia:
-
-- `sources/*.md`: moi file HTML thanh mot Markdown source, giu Dieu/Chuong/Ghi chu/Noi dung/Lien quan.
-- `articles.jsonl`: moi dong la mot dieu khoan co metadata, hash va preview, phu hop cho worker/wiki-service doc theo stream ma khong nhan doi full content.
-- `manifest.json`: checksum, article count, source count, metadata tong quat.
-- `index.md`: catalog Obsidian-friendly cho lop raw source.
-
-Wiki-service duoc doc `wiki_data/raw_sources/` nhung khong sua. Cac page LLM sinh ra nen nam o lop rieng, vi du `wiki_data/wiki/`.
-
-Neu can JSONL chua full content tung dieu khoan, chay:
-
-```bash
-python3 prepare_wiki_sources.py --clean --include-jsonl-content
-```
-
-## Luu y cho GPU Quadro K2100M
-
-Quadro K2100M co khoang 2GB VRAM va compute capability doi cu. PyTorch/sentence-transformers hien dai thuong khong chay CUDA on dinh tren GPU nay. Code mac dinh chay CPU cho embedding va reranker.
-
-Kiem tra cach code chon thiet bi:
-
-```bash
-python3 check_device.py
-```
-
-Khuyen dung cho may nay:
-
-```bash
-python3 create_faiss.py
-```
-
-Neu van muon ep CUDA de thu nghiem:
-
-```bash
-FORCE_CUDA=1 EMBEDDING_DEVICE=cuda python3 create_faiss.py
-```
-
-Nhung voi K2100M, cach ep CUDA co rui ro loi `no kernel image`, `CUDA out of memory`, hoac model chay cham/khong on dinh.
-
-## Tao hybrid index
-
-Chay tu thu muc `RAG_TTCSN`:
-
-```bash
-python3 create_faiss.py
-```
-
-Lenh nay tao:
-
-- `faiss_index/`
-- `hybrid_index/bm25_store.pkl`
-- `hybrid_index/index_manifest.json`
-
-Manifest luu embedding backend/model/dimension. Neu config hien tai khong khop index, ung dung se yeu cau build lai de tranh load sai vector index.
-
-Neu chua cai `sentence-transformers`, code se fallback sang hashing embedding de smoke test. Fallback nay khong phai embedding semantic chat luong cao.
-
-De build nhanh bang hashing:
-
-```bash
-EMBEDDING_BACKEND=hashing python3 create_faiss.py
-```
-
-De dung embedding semantic:
-
-```bash
-EMBEDDING_BACKEND=sentence-transformers \
-EMBEDDING_PROFILE=vietnamese \
-python3 create_faiss.py
-```
-
-## Chay UI
-
-```bash
-python3 -m rag.app
-```
-
-Neu index duoc tao bang hashing, chay UI cung can cung backend:
-
-```bash
-EMBEDDING_BACKEND=hashing python3 -m rag.app
-```
-
-## Bat neural reranker tuy chon
-
-Mac dinh reranker la lexical reranker nhe. Neu da cai `sentence-transformers`, co the bat cross-encoder:
-
-```bash
-RERANKER_MODEL=cross-encoder/mmarco-mMiniLMv2-L12-H384-v1 python3 -m rag.app
-```
-
-Tren Quadro K2100M reranker mac dinh chay CPU. Co the giam batch size neu RAM yeu:
-
-```bash
-RERANKER_BATCH_SIZE=4 RERANKER_MODEL=cross-encoder/mmarco-mMiniLMv2-L12-H384-v1 python3 -m rag.app
-```
-
-## Chay kien truc microservice bang Docker CPU-only
-
-Mot Docker image CPU-only duoc dung lai cho nhieu service:
-
-- Dung `python:3.10-slim`
-- Cai PyTorch CPU-only tu index cua PyTorch
-- Khong copy `data_raw/`, `wiki_data/`, `faiss_index/`, `hybrid_index/` vao image
-- Mount raw data/read-only sources read-only
-- Moi service co storage rieng qua Docker volumes
-
-Services:
-
-- `api-gateway`: compare UI va `/ask/compare`
-- `vector-rag-service`: BM25 + FAISS tren raw legal chunks
-- `wiki-rag-service`: query doc/wiki DB rieng tu `wiki_data/raw_sources`
-- `llm-service`: DeepSeek adapter stateless
-- `evaluator-service`: metrics/logs SQLite
-
-Endpoints chinh:
-
-- `api-gateway`: `POST /ask/compare`, `POST /ask/vector`, `POST /ask/wiki`, UI `/ui`
-- `vector-rag-service`: `POST /search`, `POST /answer`, `GET /index/status`
-- `wiki-rag-service`: `POST /wiki/ingest`, `POST /wiki/query`, `POST /wiki/answer`, `GET /wiki/status`
-- `llm-service`: `POST /chat`
-- `evaluator-service`: `POST /eval/run`, `GET /eval/runs`
+## Chay Bang Docker
 
 Build image:
 
 ```bash
-docker compose build
+make docker-build
 ```
 
-Chuan bi wiki raw sources tu `data_raw`:
+Chuan hoa `data_raw` thanh wiki raw sources:
 
 ```bash
 make prepare-wiki-sources
 ```
 
-Build vector index va ingest wiki DB bang job rieng:
+Build vector index:
 
 ```bash
 make docker-build-vector-index
+```
+
+Ingest wiki DB:
+
+```bash
 make docker-ingest-wiki
 ```
 
-Hoac chay tat ca buoc data prep:
+Chay toan bo he thong:
 
 ```bash
-make docker-rebuild-all-data
-```
-
-Chay he thong:
-
-```bash
-docker compose up
+make docker-up
 ```
 
 Mo UI:
 
 ```text
-http://localhost:7860
+http://localhost:7860/ui
 ```
 
-Runtime app mac dinh khong tu build index (`AUTO_BUILD_INDEX=false`). Neu chua co `hybrid_index/index_manifest.json`, container se thoat va bao can chay:
+Dung he thong:
 
 ```bash
-make docker-build-vector-index
+make docker-down
 ```
-
-Cach nay tranh cold start trong app runtime. Model cache, vector index, wiki DB va eval DB duoc giu trong named volumes.
 
 Xem logs:
 
@@ -250,35 +161,46 @@ Xem logs:
 make docker-logs
 ```
 
-Dung container:
+## Truong Hop Da Build Index Tu Service Cu
+
+Neu truoc day da build index trong volume cu cua service `rag`, co the migrate sang volume moi cua `vector-rag-service`:
 
 ```bash
-docker compose down
+make docker-migrate-legacy-vector-index
 ```
 
-Xoa ca index/model cache trong Docker volumes:
+Sau do chay lai:
 
 ```bash
-make docker-clean-volumes
+make docker-up
 ```
 
-Neu can image nho hon nua va chi test BM25/hash embedding, build khong cai embedding model:
+## API Chinh
 
-```bash
-docker compose build --build-arg INSTALL_EMBEDDINGS=false
-EMBEDDING_BACKEND=hashing docker compose up
+Gateway public o cong `7860`:
+
+```text
+GET  /health
+POST /ask/compare
+POST /ask/vector
+POST /ask/wiki
+GET  /ui
 ```
 
-## Cach du lieu duoc xu ly
+Payload mau:
 
-Parser uu tien cac class HTML:
+```json
+{
+  "question": "doi tuong ap dung hien lay ghep mo bo phan co the nguoi la gi",
+  "top_k": 2,
+  "candidate_k": 20,
+  "use_llm": true
+}
+```
 
-- `pChuong`: Chuong va ten chuong
-- `pDieu`: Dieu va tieu de dieu
-- `pGhiChu`: can cu van ban, ngay hieu luc, URL nguon
-- `pNoiDung`: noi dung dieu
-- `pChiDan`: cac dieu/van ban lien quan
+## Ghi Chu Van Hanh
 
-Moi chunk co metadata nhu `article_code`, `article_title`, `doc_type`, `effective_date`, `legal_note`, `urls`, `related_text`, `related_urls`, `source`.
-
-Thu muc `demuc/` neu co chi la ban sao cua `data_raw/` va khong duoc pipeline su dung.
+- Lan khoi dong dau co the mat vai giay de preload vector index va wiki cache.
+- Retrieval-only thuong nhanh hon nhieu so voi cau hoi co LLM.
+- Neu khong muon goi DeepSeek, dat `use_llm=false` khi goi API.
+- Khong commit file `.env` len GitHub.
