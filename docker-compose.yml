@@ -1,0 +1,129 @@
+services:
+  api-gateway:
+    build:
+      context: .
+      args:
+        INSTALL_EMBEDDINGS: "true"
+        TORCH_VERSION: "2.3.1+cpu"
+        SENTENCE_TRANSFORMERS_VERSION: "3.0.1"
+    image: rag-ttcsn:cpu
+    command: ["uvicorn", "services.api_gateway.app:app", "--host", "0.0.0.0", "--port", "7860"]
+    ports:
+      - "7860:7860"
+    environment:
+      VECTOR_SERVICE_URL: http://vector-rag-service:8001
+      WIKI_SERVICE_URL: http://wiki-rag-service:8002
+      EVALUATOR_SERVICE_URL: http://evaluator-service:8004
+    depends_on:
+      vector-rag-service:
+        condition: service_healthy
+      wiki-rag-service:
+        condition: service_healthy
+      evaluator-service:
+        condition: service_healthy
+      llm-service:
+        condition: service_healthy
+    restart: unless-stopped
+
+  vector-rag-service:
+    image: rag-ttcsn:cpu
+    build:
+      context: .
+      args:
+        INSTALL_EMBEDDINGS: "true"
+        TORCH_VERSION: "2.3.1+cpu"
+        SENTENCE_TRANSFORMERS_VERSION: "3.0.1"
+    command: ["uvicorn", "services.vector_rag_service.app:app", "--host", "0.0.0.0", "--port", "8001"]
+    environment:
+      EMBEDDING_BACKEND: ${EMBEDDING_BACKEND:-sentence-transformers}
+      EMBEDDING_PROFILE: ${EMBEDDING_PROFILE:-vietnamese}
+      EMBEDDING_DEVICE: ${EMBEDDING_DEVICE:-cpu}
+      EMBEDDING_BATCH_SIZE: ${EMBEDDING_BATCH_SIZE:-8}
+      RERANKER_DEVICE: ${RERANKER_DEVICE:-cpu}
+      RERANKER_BATCH_SIZE: ${RERANKER_BATCH_SIZE:-4}
+      PRELOAD_VECTOR_INDEX: ${PRELOAD_VECTOR_INDEX:-true}
+      LLM_SERVICE_URL: http://llm-service:8003
+    volumes:
+      - ./data_raw:/app/data_raw:ro
+      - vector_faiss_index:/app/faiss_index
+      - vector_hybrid_index:/app/hybrid_index
+      - model_cache:/cache
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8001/health | grep -q '\"status\":\"ok\"'"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 90s
+    restart: unless-stopped
+
+  wiki-rag-service:
+    image: rag-ttcsn:cpu
+    build:
+      context: .
+      args:
+        INSTALL_EMBEDDINGS: "true"
+        TORCH_VERSION: "2.3.1+cpu"
+        SENTENCE_TRANSFORMERS_VERSION: "3.0.1"
+    command: ["uvicorn", "services.wiki_rag_service.app:app", "--host", "0.0.0.0", "--port", "8002"]
+    environment:
+      RAW_SOURCES_DIR: /app/wiki_data/raw_sources
+      WIKI_DB_PATH: /app/wiki_db/wiki.db
+      PRELOAD_WIKI_CACHE: ${PRELOAD_WIKI_CACHE:-true}
+      LLM_SERVICE_URL: http://llm-service:8003
+    volumes:
+      - ./wiki_data/raw_sources:/app/wiki_data/raw_sources:ro
+      - wiki_db:/app/wiki_db
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8002/health | grep -q '\"status\":\"ok\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+    restart: unless-stopped
+
+  llm-service:
+    image: rag-ttcsn:cpu
+    build:
+      context: .
+      args:
+        INSTALL_EMBEDDINGS: "true"
+        TORCH_VERSION: "2.3.1+cpu"
+        SENTENCE_TRANSFORMERS_VERSION: "3.0.1"
+    command: ["uvicorn", "services.llm_service.app:app", "--host", "0.0.0.0", "--port", "8003"]
+    volumes:
+      - ./.env:/app/.env:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8003/health | grep -q '\"status\":\"ok\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    restart: unless-stopped
+
+  evaluator-service:
+    image: rag-ttcsn:cpu
+    build:
+      context: .
+      args:
+        INSTALL_EMBEDDINGS: "true"
+        TORCH_VERSION: "2.3.1+cpu"
+        SENTENCE_TRANSFORMERS_VERSION: "3.0.1"
+    command: ["uvicorn", "services.evaluator_service.app:app", "--host", "0.0.0.0", "--port", "8004"]
+    environment:
+      EVAL_DB_PATH: /app/eval_data/eval.db
+    volumes:
+      - eval_data:/app/eval_data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8004/health | grep -q '\"status\":\"ok\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  vector_faiss_index:
+  vector_hybrid_index:
+  model_cache:
+  wiki_db:
+  eval_data:
