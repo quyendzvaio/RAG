@@ -1,4 +1,5 @@
 from rag.device import choose_torch_device, nvidia_smi_summary
+from shared.config import get_settings
 
 
 if __name__ == "__main__":
@@ -8,8 +9,6 @@ if __name__ == "__main__":
     else:
         print("nvidia-smi: khong co hoac khong doc duoc")
 
-    embedding_choice = choose_torch_device("EMBEDDING_DEVICE", default="cpu")
-    reranker_choice = choose_torch_device("RERANKER_DEVICE", default="cpu")
-
-    print("embedding:", embedding_choice)
-    print("reranker:", reranker_choice)
+    settings = get_settings()
+    print("embedding:", choose_torch_device(settings.embedding.device, "EMBEDDING_DEVICE", settings.force_cuda))
+    print("reranker:", choose_torch_device(settings.reranker.device, "RERANKER_DEVICE", settings.force_cuda))

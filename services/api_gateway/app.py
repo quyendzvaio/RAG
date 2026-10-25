@@ -1,4 +1,4 @@
-import os
+import logging
 from concurrent.futures import ThreadPoolExecutor
 
 import gradio as gr
@@ -6,13 +6,15 @@ from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 from gradio.routes import mount_gradio_app
 
+from shared.config import get_settings
 from shared.http import service_client
-from shared.schemas import AskRequest, CompareRequest, CompareResponse, EvaluationRecord, HealthResponse, ServiceAnswer
+from shared.log import setup_logging
+from shared.schemas import AskRequest, CompareResponse, EvaluationRecord, HealthResponse, ServiceAnswer
 
 
-VECTOR_SERVICE_URL = os.getenv("VECTOR_SERVICE_URL", "http://vector-rag-service:8001")
-WIKI_SERVICE_URL = os.getenv("WIKI_SERVICE_URL", "http://wiki-rag-service:8002")
-EVALUATOR_SERVICE_URL = os.getenv("EVALUATOR_SERVICE_URL", "http://evaluator-service:8004")
+setup_logging()
+logger = logging.getLogger(__name__)
+SERVICES = get_settings().services
 
 app = FastAPI(title="api-gateway", version="0.1.0")
 
@@ -28,66 +30,63 @@ def health() -> HealthResponse:
 
 
 @app.post("/ask/compare", response_model=CompareResponse)
-def ask_compare(request: CompareRequest) -> CompareResponse:
+def ask_compare(request: AskRequest) -> CompareResponse:
     with ThreadPoolExecutor(max_workers=2) as executor:
-        vector_future = executor.submit(_call_answer, f"{VECTOR_SERVICE_URL}/answer", request)
-        wiki_future = executor.submit(_call_answer, f"{WIKI_SERVICE_URL}/wiki/answer", request)
+        vector_future = executor.submit(_ask_vector_service, request)
+        wiki_future = executor.submit(_ask_wiki_service, request)
         vector = vector_future.result()
         wiki = wiki_future.result()
 
-    metrics = []
-    run_id = None
-    try:
-        eval_record = EvaluationRecord(question=request.question, vector_answer=vector, wiki_answer=wiki)
-        with service_client() as client:
-            response = client.post(f"{EVALUATOR_SERVICE_URL}/eval/run", json=eval_record.model_dump())
-            response.raise_for_status()
-            data = response.json()
-        run_id = data.get("run_id")
-        metrics = data.get("metrics", [])
-    except Exception:
-        metrics = []
-
-    return CompareResponse(
-        question=request.question,
-        vector=vector,
-        wiki=wiki,
-        metrics=metrics,
-        run_id=run_id,
-    )
+    run_id, metrics = _evaluate(request.question, vector, wiki)
+    return CompareResponse(question=request.question, vector=vector, wiki=wiki, metrics=metrics, run_id=run_id)
 
 
 @app.post("/ask/vector", response_model=ServiceAnswer)
 def ask_vector(request: AskRequest) -> ServiceAnswer:
-    return _call_answer(f"{VECTOR_SERVICE_URL}/answer", request)
+    return _ask_vector_service(request)
 
 
 @app.post("/ask/wiki", response_model=ServiceAnswer)
 def ask_wiki(request: AskRequest) -> ServiceAnswer:
-    return _call_answer(f"{WIKI_SERVICE_URL}/wiki/answer", request)
+    return _ask_wiki_service(request)
 
 
-def _call_answer(url: str, request) -> ServiceAnswer:
+def _ask_vector_service(request: AskRequest) -> ServiceAnswer:
+    return _call_answer("vector-rag-service", f"{SERVICES.vector}/answer", request)
+
+
+def _ask_wiki_service(request: AskRequest) -> ServiceAnswer:
+    return _call_answer("wiki-rag-service", f"{SERVICES.wiki}/wiki/answer", request)
+
+
+def _call_answer(service: str, url: str, request: AskRequest) -> ServiceAnswer:
     try:
-        payload = {
-            "question": request.question,
-            "top_k": request.top_k,
-            "candidate_k": request.candidate_k,
-            "use_llm": request.use_llm,
-        }
         with service_client() as client:
-            response = client.post(url, json=payload)
+            response = client.post(url, json=request.model_dump())
             response.raise_for_status()
             return ServiceAnswer.model_validate(response.json())
     except Exception as exc:
-        service = "vector-rag-service" if "vector" in url else "wiki-rag-service"
         return ServiceAnswer(service=service, question=request.question, answer="", error=str(exc))
+
+
+def _evaluate(question: str, vector: ServiceAnswer, wiki: ServiceAnswer):
+    """Ghi lan chay vao evaluator; loi evaluator khong lam hong cau tra loi."""
+    try:
+        record = EvaluationRecord(question=question, vector_answer=vector, wiki_answer=wiki)
+        with service_client() as client:
+            response = client.post(f"{SERVICES.evaluator}/eval/run", json=record.model_dump())
+            response.raise_for_status()
+            data = response.json()
+        return data.get("run_id"), data.get("metrics", [])
+    except Exception as exc:
+        logger.warning("Evaluator loi, bo qua metrics: %s", exc)
+        return None, []
 
 
 def _build_ui():
     def compare(question, top_k, candidate_k, use_llm):
         response = ask_compare(
-            CompareRequest(
+            AskRequest(
                 question=question,
                 top_k=int(top_k),
                 candidate_k=int(candidate_k),
@@ -135,11 +134,7 @@ def _format_answer(answer: ServiceAnswer) -> str:
 def _format_metrics(response: CompareResponse) -> str:
     lines = [f"Run ID: {response.run_id}", ""]
     for metric in response.metrics:
-        if hasattr(metric, "model_dump"):
-            data = metric.model_dump()
-        else:
-            data = metric
-        lines.append(f"{data.get('name')}: {data.get('value')} - {data.get('explanation', '')}")
+        lines.append(f"{metric.name}: {metric.value} - {metric.explanation}")
     return "\n".join(lines)
 
 

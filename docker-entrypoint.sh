@@ -7,11 +7,6 @@ if [ "$(id -u)" = "0" ]; then
   exec gosu appuser "$0" "$@"
 fi
 
-is_app_command=false
-if [ "${1:-}" = "python" ] && [ "${2:-}" = "-m" ] && [ "${3:-}" = "rag.app" ]; then
-  is_app_command=true
-fi
-
 if [ "${AUTO_BUILD_INDEX:-false}" = "true" ]; then
   if [ ! -d "/app/data_raw" ] || [ "$(find /app/data_raw -maxdepth 1 -name '*.html' 2>/dev/null | head -n 1)" = "" ]; then
     echo "Khong thay /app/data_raw/*.html. Hay mount data_raw vao container."
@@ -23,14 +18,6 @@ if [ "${AUTO_BUILD_INDEX:-false}" = "true" ]; then
   else
     echo "Da co hybrid index, bo qua build."
   fi
-elif [ "$is_app_command" = "true" ] && [ ! -f "/app/hybrid_index/index_manifest.json" ]; then
-  if [ ! -d "/app/data_raw" ] || [ "$(find /app/data_raw -maxdepth 1 -name '*.html' 2>/dev/null | head -n 1)" = "" ]; then
-    echo "Khong thay /app/data_raw/*.html. Hay mount data_raw vao container."
-    exit 1
-  fi
-  echo "Chua co hybrid index. Production mode khong tu build index."
-  echo "Hay chay truoc: make docker-build-vector-index"
-  exit 1
 fi
 
 exec "$@"

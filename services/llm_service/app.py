@@ -1,26 +1,27 @@
-import os
 from typing import Dict
 
 import httpx
 from fastapi import FastAPI
 
-from rag.settings import deepseek_settings
+from shared.config import get_settings
 from shared.http import DEFAULT_TIMEOUT, timer_ms
+from shared.log import setup_logging
 from shared.schemas import ChatRequest, ChatResponse, HealthResponse
 
 
+setup_logging()
 app = FastAPI(title="llm-service", version="0.1.0")
 
 
 @app.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
-    settings = deepseek_settings()
+    settings = get_settings().deepseek
     return HealthResponse(service="llm-service", status="ok" if settings.configured else "missing_api_key")
 
 
 @app.post("/chat", response_model=ChatResponse)
 def chat(request: ChatRequest) -> ChatResponse:
-    settings = deepseek_settings()
+    settings = get_settings().deepseek
     model = request.model or settings.model
     with timer_ms() as elapsed:
         if not settings.configured:
@@ -44,7 +45,7 @@ def chat(request: ChatRequest) -> ChatResponse:
         }
         try:
             with httpx.Client(timeout=DEFAULT_TIMEOUT) as client:
-                response = client.post(f"{settings.base_url.rstrip('/')}/v1/chat/completions", json=payload, headers=headers)
+                response = client.post(settings.chat_completions_url, json=payload, headers=headers)
                 response.raise_for_status()
                 data = response.json()
         except Exception as exc:

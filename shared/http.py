@@ -1,6 +1,6 @@
 import time
 from contextlib import contextmanager
-from typing import Iterator
+from typing import Callable, Iterator
 
 import httpx
 
@@ -13,6 +13,6 @@ def service_client() -> httpx.Client:
 
 
 @contextmanager
-def timer_ms() -> Iterator[callable]:
+def timer_ms() -> Iterator[Callable[[], float]]:
     start = time.perf_counter()
     yield lambda: (time.perf_counter() - start) * 1000

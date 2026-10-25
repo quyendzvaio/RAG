@@ -1,18 +1,14 @@
 import hashlib
-import os
-from typing import Dict, List
+import logging
+from typing import Dict, List, Optional
 
 from langchain_core.embeddings import Embeddings
 
 from rag.device import choose_torch_device
+from shared.config import EmbeddingSettings, get_settings
 
 
-EMBEDDING_PROFILES = {
-    "vietnamese": "bkai-foundation-models/vietnamese-bi-encoder",
-    "bge-m3": "BAAI/bge-m3",
-    "multilingual-e5-base": "intfloat/multilingual-e5-base",
-    "multilingual-minilm": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
-}
+logger = logging.getLogger(__name__)
 
 
 class HashingEmbeddings(Embeddings):
@@ -39,48 +35,43 @@ class HashingEmbeddings(Embeddings):
         return [value / norm for value in vector]
 
 
-def get_embedding_model():
-    backend = os.getenv("EMBEDDING_BACKEND", "sentence-transformers").strip().lower()
-    profile = os.getenv("EMBEDDING_PROFILE", "vietnamese").strip().lower()
-    default_model = EMBEDDING_PROFILES.get(profile, EMBEDDING_PROFILES["vietnamese"])
-    model_name = os.getenv("EMBEDDING_MODEL", default_model)
+def get_embedding_model(config: Optional[EmbeddingSettings] = None):
+    config = config or get_settings().embedding
 
-    if backend in {"sentence-transformers", "huggingface", "hf"}:
+    if config.backend in {"sentence-transformers", "huggingface", "hf"}:
         try:
             from langchain_community.embeddings import HuggingFaceEmbeddings
 
-            choice = choose_torch_device("EMBEDDING_DEVICE", default="cpu")
-            print(f"Embedding device: {choice.device} ({choice.reason})")
+            choice = choose_torch_device(config.device, "EMBEDDING_DEVICE", get_settings().force_cuda)
+            logger.info("Embedding device: %s (%s)", choice.device, choice.reason)
             if choice.gpu_name:
-                print(
-                    "GPU:",
+                logger.info(
+                    "GPU: %s compute_capability: %s memory_mb: %s",
                     choice.gpu_name,
-                    "compute_capability:",
                     choice.compute_capability,
-                    "memory_mb:",
                     choice.total_memory_mb,
                 )
             return HuggingFaceEmbeddings(
-                model_name=model_name,
+                model_name=config.model,
                 model_kwargs={"device": choice.device},
-                encode_kwargs={
-                    "batch_size": int(os.getenv("EMBEDDING_BATCH_SIZE", "8")),
-                    "normalize_embeddings": True,
-                },
+                encode_kwargs={"batch_size": config.batch_size, "normalize_embeddings": True},
             )
         except Exception as exc:
-            print("Khong tai duoc HuggingFaceEmbeddings, dung fallback hashing.")
-            print("Loi:", exc)
-            print("Luu y: hashing chi phu hop smoke test, khong phu hop chat luong production.")
+            logger.warning(
+                "Khong tai duoc HuggingFaceEmbeddings, dung fallback hashing "
+                "(chi phu hop smoke test, khong phu hop production). Loi: %s",
+                exc,
+            )
             return HashingEmbeddings()
 
-    if backend == "hashing":
-        return HashingEmbeddings(dimensions=int(os.getenv("HASHING_EMBEDDING_DIM", "384")))
+    if config.backend == "hashing":
+        return HashingEmbeddings(dimensions=config.hashing_dim)
 
-    raise ValueError(f"Embedding backend khong ho tro: {backend}")
+    raise ValueError(f"Embedding backend khong ho tro: {config.backend}")
 
 
 def embedding_config(embedding_model) -> Dict[str, str]:
+    """Cau hinh embedding ghi vao index manifest va dung de kiem tra khi load."""
     if isinstance(embedding_model, HashingEmbeddings):
         return {
             "backend": "hashing",
@@ -89,13 +80,10 @@ def embedding_config(embedding_model) -> Dict[str, str]:
             "dimensions": str(embedding_model.dimensions),
         }
 
-    profile = os.getenv("EMBEDDING_PROFILE", "vietnamese").strip().lower()
-    default_model = EMBEDDING_PROFILES.get(profile, EMBEDDING_PROFILES["vietnamese"])
-    model_name = os.getenv("EMBEDDING_MODEL", getattr(embedding_model, "model_name", default_model))
-    backend = os.getenv("EMBEDDING_BACKEND", "sentence-transformers").strip().lower()
+    config = get_settings().embedding
     return {
-        "backend": backend,
-        "profile": profile,
-        "model": str(model_name),
+        "backend": config.backend,
+        "profile": config.profile,
+        "model": config.model,
         "dimensions": "",
     }

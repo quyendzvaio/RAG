@@ -10,6 +10,8 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 LEGAL_DATE_RE = re.compile(r"có hiệu lực(?: thi hành)?(?: kể từ ngày| từ ngày)?\s+(\d{1,2}/\d{1,2}/\d{4})", re.I)
 ARTICLE_RE = re.compile(r"^(Điều\s+[\w.\-]+)(?:\.\s*)?(.*)$", re.I)
+CHUNK_SIZE = 1200
+CHUNK_OVERLAP = 180
 
 
 def clean_text(text: str) -> str:
@@ -55,6 +57,13 @@ def _article_parts(article_text: str) -> Tuple[str, str]:
     if not match:
         return article_text.strip(), ""
     return match.group(1).strip(), match.group(2).strip()
+
+
+def article_heading(metadata: dict) -> str:
+    """Tieu de hien thi cua mot Dieu, vd "Điều 10.1.QĐ.12.1. Phạm vi điều chỉnh"."""
+    return " ".join(
+        value for value in (metadata.get("article_code", ""), metadata.get("article_title", "")) if value
+    ).strip()
 
 
 def _infer_doc_type(article_code: str, legal_note: str) -> str:
@@ -232,8 +241,8 @@ def load_html_documents(directory: str) -> List[Document]:
 
 def split_documents(documents: List[Document]) -> List[Document]:
     splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1200,
-        chunk_overlap=180,
+        chunk_size=CHUNK_SIZE,
+        chunk_overlap=CHUNK_OVERLAP,
         separators=["\n\n", "\n", ". ", "; ", ", ", " ", ""],
     )
     chunks = splitter.split_documents(documents)

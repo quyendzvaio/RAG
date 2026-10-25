@@ -119,7 +119,7 @@ Build image:
 make docker-build
 ```
 
-Chuan hoa `data_raw` thanh wiki raw sources:
+Chuan hoa `data_raw` thanh wiki raw sources (chay trong container, ghi ra `wiki_data/raw_sources`):
 
 ```bash
 make prepare-wiki-sources
@@ -161,20 +161,6 @@ Xem logs:
 make docker-logs
 ```
 
-## Truong Hop Da Build Index Tu Service Cu
-
-Neu truoc day da build index trong volume cu cua service `rag`, co the migrate sang volume moi cua `vector-rag-service`:
-
-```bash
-make docker-migrate-legacy-vector-index
-```
-
-Sau do chay lai:
-
-```bash
-make docker-up
-```
-
 ## API Chinh
 
 Gateway public o cong `7860`:
@@ -197,6 +183,16 @@ Payload mau:
   "use_llm": true
 }
 ```
+
+## Danh Gia Retrieval Tren Golden Set
+
+```bash
+make eval-golden                                   # sinh eval/golden.jsonl bang DeepSeek
+make eval-retrieval EVAL_TAG=baseline              # can stack dang chay
+make eval-retrieval EVAL_TAG=moi ARGS="--compare baseline"
+```
+
+Script goi `/ask/vector` va `/ask/wiki` voi `use_llm=false`, tinh Recall@1, Recall@5, MRR va latency cho cau hoi co dau va khong dau, luu ket qua vao `eval/results/<tag>.json`.
 
 ## Ghi Chu Van Hanh
 

@@ -7,12 +7,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     HF_HOME=/cache/huggingface \
     TRANSFORMERS_CACHE=/cache/huggingface/transformers \
     SENTENCE_TRANSFORMERS_HOME=/cache/sentence-transformers \
-    EMBEDDING_BACKEND=sentence-transformers \
-    EMBEDDING_PROFILE=vietnamese \
-    EMBEDDING_DEVICE=cpu \
-    RERANKER_DEVICE=cpu \
-    EMBEDDING_BATCH_SIZE=8 \
-    RERANKER_BATCH_SIZE=4 \
     AUTO_BUILD_INDEX=false
 
 ARG INSTALL_EMBEDDINGS=true
@@ -50,4 +44,4 @@ RUN useradd --create-home --shell /bin/sh appuser \
 EXPOSE 7860 8001 8002 8003 8004
 
 ENTRYPOINT ["/app/docker-entrypoint.sh"]
-CMD ["python", "-m", "rag.app"]
+CMD ["uvicorn", "services.api_gateway.app:app", "--host", "0.0.0.0", "--port", "7860"]

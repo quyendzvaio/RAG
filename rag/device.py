@@ -1,4 +1,3 @@
-import os
 import subprocess
 from dataclasses import dataclass
 from typing import Optional
@@ -13,13 +12,13 @@ class DeviceChoice:
     total_memory_mb: int = 0
 
 
-def choose_torch_device(env_var: str, default: str = "auto") -> DeviceChoice:
-    requested = os.getenv(env_var, default).strip().lower()
+def choose_torch_device(requested: str, label: str, force_cuda: bool = False) -> DeviceChoice:
+    """Chon device cho torch; `label` la ten bien moi truong, chi dung de giai thich."""
     if requested in {"cpu", "mps"}:
-        return DeviceChoice(device=requested, reason=f"{env_var}={requested}")
+        return DeviceChoice(device=requested, reason=f"{label}={requested}")
 
-    if requested in {"cuda", "gpu"} and _force_cuda():
-        return DeviceChoice(device="cuda", reason=f"{env_var}={requested}, FORCE_CUDA=1")
+    if requested in {"cuda", "gpu"} and force_cuda:
+        return DeviceChoice(device="cuda", reason=f"{label}={requested}, FORCE_CUDA=1")
 
     try:
         import torch
@@ -30,7 +29,7 @@ def choose_torch_device(env_var: str, default: str = "auto") -> DeviceChoice:
         return DeviceChoice(device="cpu", reason="torch khong thay CUDA kha dung")
 
     if requested not in {"auto", "cuda", "gpu"}:
-        return DeviceChoice(device="cpu", reason=f"{env_var}={requested} khong ho tro, fallback CPU")
+        return DeviceChoice(device="cpu", reason=f"{label}={requested} khong ho tro, fallback CPU")
 
     if not torch.cuda.is_available():
         return DeviceChoice(device="cpu", reason="CUDA khong kha dung")
@@ -85,7 +84,3 @@ def nvidia_smi_summary() -> Optional[str]:
     except Exception:
         return None
     return result.stdout.strip() or None
-
-
-def _force_cuda() -> bool:
-    return os.getenv("FORCE_CUDA", "false").strip().lower() in {"1", "true", "yes"}

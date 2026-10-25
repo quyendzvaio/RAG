@@ -1,14 +1,15 @@
-import os
 from functools import lru_cache
 
 from fastapi import FastAPI
 
 from services.evaluator_service.store import EvalStore, compute_metrics
+from shared.config import get_settings
+from shared.log import setup_logging
 from shared.schemas import EvaluationRecord, HealthResponse
 
 
+setup_logging()
 app = FastAPI(title="evaluator-service", version="0.1.0")
-EVAL_DB_PATH = os.getenv("EVAL_DB_PATH", "eval_data/eval.db")
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -31,4 +32,4 @@ def eval_runs(limit: int = 20):
 
 @lru_cache(maxsize=1)
 def _store() -> EvalStore:
-    return EvalStore(EVAL_DB_PATH)
+    return EvalStore(get_settings().paths.eval_db)

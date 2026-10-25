@@ -10,7 +10,7 @@ from typing import Dict, Iterable, List
 
 from langchain_core.documents import Document
 
-from rag.data_loader import parse_legal_html
+from rag.data_loader import article_heading, parse_legal_html
 
 
 def prepare_wiki_sources(input_dir: str, output_dir: str, include_jsonl_content: bool = False) -> Dict[str, int]:
@@ -138,14 +138,7 @@ def _write_source_markdown(
 
     for document in documents:
         metadata = document.metadata
-        title = " ".join(
-            value
-            for value in (
-                metadata.get("article_code", ""),
-                metadata.get("article_title", ""),
-            )
-            if value
-        ).strip()
+        title = article_heading(metadata)
         lines.extend(
             [
                 f"## {title or 'Untitled Article'}",
@@ -186,19 +179,11 @@ def _write_source_markdown(
 
 def _document_record(document: Document, source_hash: str, source_markdown: str, include_content: bool) -> Dict:
     metadata = dict(document.metadata)
-    article_heading = " ".join(
-        value
-        for value in (
-            metadata.get("article_code", ""),
-            metadata.get("article_title", ""),
-        )
-        if value
-    ).strip()
     record = {
         "id": f"{Path(metadata.get('source_file', metadata.get('source', 'source'))).stem}:{metadata.get('article_index', '')}",
         "source_hash": source_hash,
         "source_markdown": f"sources/{source_markdown}",
-        "article_heading": article_heading,
+        "article_heading": article_heading(metadata),
         "metadata": metadata,
         "content_hash": _sha256_bytes(document.page_content.encode("utf-8")),
         "content_preview": document.page_content[:500],

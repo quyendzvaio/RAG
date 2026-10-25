@@ -63,13 +63,6 @@ class ChatResponse(BaseModel):
     error: Optional[str] = None
 
 
-class CompareRequest(BaseModel):
-    question: str
-    top_k: int = 5
-    candidate_k: int = 40
-    use_llm: bool = True
-
-
 class MetricScore(BaseModel):
     name: str
     value: float

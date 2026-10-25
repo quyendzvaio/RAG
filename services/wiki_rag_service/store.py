@@ -1,21 +1,26 @@
 import json
-import math
 import os
 import sqlite3
-from collections import Counter
+from dataclasses import dataclass
 from pathlib import Path
 from threading import Lock
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
-from rag.bm25_store import tokenize
+from rag.bm25_store import BM25Index, tokenize
 from shared.schemas import ContextItem
+
+
+@dataclass
+class _SearchCache:
+    rows: List[Dict]
+    index: BM25Index
 
 
 class WikiStore:
     def __init__(self, db_path: str, raw_sources_dir: str):
         self.db_path = db_path
         self.raw_sources_dir = Path(raw_sources_dir)
-        self._search_cache: Optional[Dict] = None
+        self._search_cache: Optional[_SearchCache] = None
         self._cache_lock = Lock()
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
         self._init_db()
@@ -67,30 +72,13 @@ class WikiStore:
         }
 
     def warm_cache(self) -> Dict[str, int]:
-        cache = self._load_search_cache()
-        return {"article_count": len(cache["rows"])}
+        return {"article_count": len(self._load_search_cache().rows)}
 
     def search(self, query: str, top_k: int = 5) -> List[ContextItem]:
-        query_terms = tokenize(query)
-        if not query_terms:
-            return []
-
         cache = self._load_search_cache()
-        rows = cache["rows"]
-        total_docs = cache["total_docs"]
-        df = cache["df"]
-        tokenized_rows = cache["tokenized_rows"]
-        avg_len = cache["avg_len"]
-        scored: List[Tuple[int, float]] = []
-        for index, counts in enumerate(tokenized_rows):
-            score = _bm25_score(query_terms, counts, df, total_docs, avg_len)
-            if score > 0:
-                scored.append((index, score))
-        scored.sort(key=lambda item: item[1], reverse=True)
-
         contexts = []
-        for index, score in scored[:top_k]:
-            row = rows[index]
+        for index, score in cache.index.top_k(tokenize(query), top_k):
+            row = cache.rows[index]
             metadata = json.loads(row["metadata_json"])
             content = _read_source_section(self.raw_sources_dir / row["source_markdown"], row["article_heading"])
             citation = metadata.get("legal_note") or metadata.get("source_file") or row["source_markdown"]
@@ -135,32 +123,15 @@ class WikiStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
-    def _load_search_cache(self) -> Dict:
+    def _load_search_cache(self) -> _SearchCache:
         if self._search_cache is not None:
             return self._search_cache
 
         with self._cache_lock:
-            if self._search_cache is not None:
-                return self._search_cache
-
-            rows = self._load_article_rows()
-            total_docs = max(len(rows), 1)
-            df = Counter()
-            tokenized_rows = []
-            for row in rows:
-                counts = Counter(tokenize(row["searchable_text"]))
-                tokenized_rows.append(counts)
-                for token in counts:
-                    df[token] += 1
-
-            avg_len = sum(sum(counts.values()) for counts in tokenized_rows) / total_docs
-            self._search_cache = {
-                "rows": rows,
-                "total_docs": total_docs,
-                "df": df,
-                "tokenized_rows": tokenized_rows,
-                "avg_len": avg_len,
-            }
+            if self._search_cache is None:
+                rows = self._load_article_rows()
+                index = BM25Index([tokenize(row["searchable_text"]) for row in rows])
+                self._search_cache = _SearchCache(rows=rows, index=index)
             return self._search_cache
 
 
@@ -180,19 +151,6 @@ def _searchable_record_text(record: Dict) -> str:
         )
         if value
     )
-
-
-def _bm25_score(query_terms, counts, df, total_docs, avg_len, k1=1.5, b=0.75) -> float:
-    score = 0.0
-    doc_len = sum(counts.values()) or 1
-    for term in query_terms:
-        tf = counts.get(term, 0)
-        if tf == 0:
-            continue
-        idf = math.log(1 + (total_docs - df.get(term, 0) + 0.5) / (df.get(term, 0) + 0.5))
-        norm = k1 * (1 - b + b * doc_len / max(avg_len, 1))
-        score += idf * (tf * (k1 + 1)) / (tf + norm)
-    return score
 
 
 def _read_source_section(path: Path, heading: str) -> str:
