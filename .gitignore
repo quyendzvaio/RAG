@@ -8,3 +8,5 @@ wiki_data/
 wiki_db/
 eval_data/
 vector_data/
+
+.env
