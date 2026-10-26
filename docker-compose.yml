@@ -66,13 +66,11 @@ services:
         SENTENCE_TRANSFORMERS_VERSION: "3.0.1"
     command: ["uvicorn", "services.wiki_rag_service.app:app", "--host", "0.0.0.0", "--port", "8002"]
     environment:
-      RAW_SOURCES_DIR: /app/wiki_data/raw_sources
-      WIKI_DB_PATH: /app/wiki_db/wiki.db
+      WIKI_DIR: /app/wiki_data/wiki
       PRELOAD_WIKI_CACHE: ${PRELOAD_WIKI_CACHE:-true}
       LLM_SERVICE_URL: http://llm-service:8003
     volumes:
-      - ./wiki_data/raw_sources:/app/wiki_data/raw_sources:ro
-      - wiki_db:/app/wiki_db
+      - ./wiki_data:/app/wiki_data:ro
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8002/health | grep -q '\"status\":\"ok\"'"]
       interval: 10s
@@ -125,5 +123,4 @@ volumes:
   vector_faiss_index:
   vector_hybrid_index:
   model_cache:
-  wiki_db:
   eval_data:

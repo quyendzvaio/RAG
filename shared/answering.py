@@ -14,6 +14,7 @@ from shared.schemas import AskRequest, ChatMessage, ContextItem, ServiceAnswer
 Retriever = Callable[[str, int, int], List[ContextItem]]
 
 LLM_CONTEXT_CHARS = 6000  # = PARENT_CONTEXT_CHARS cua vector service: gui nguyen Dieu cho LLM
+WIKI_CONTEXT_CHARS = 13000  # trang wiki dai nhat ~12300 ky tu (khong tinh danh sach Dieu cuoi trang)
 EXTRACTIVE_CONTEXT_CHARS = 500
 ANSWER_MAX_TOKENS = 2500  # 1000 cat ngang cac cau tra loi liet ke ho so/dieu kien; bi cat thi shared.llm goi lai gap doi
 TRUNCATED_NOTE = "\n\n_(Câu trả lời bị cắt do vượt giới hạn độ dài.)_"
@@ -26,6 +27,7 @@ class PromptStyle:
     context_label: str
     no_context: str
     extractive_header: str
+    context_chars: int = LLM_CONTEXT_CHARS  # moi context cat toi day truoc khi gui LLM
 
 
 VECTOR_PROMPT = PromptStyle(
@@ -42,13 +44,14 @@ VECTOR_PROMPT = PromptStyle(
 WIKI_PROMPT = PromptStyle(
     system="Bạn trả lời chính xác, có căn cứ, không bịa.",
     instructions=(
-        "Bạn là trợ lý pháp luật Việt Nam dùng wiki Markdown đã chuẩn hóa. "
-        "Trả lời chỉ dựa trên context wiki/raw-source được cung cấp. "
-        "Luôn trích citation theo số context. Nếu thiếu căn cứ, nói rõ."
+        "Bạn là trợ lý pháp luật Việt Nam. Trả lời chỉ dựa trên các trang wiki pháp luật được cung cấp "
+        "(trang tổng hợp nhiều Điều, mỗi ý có mã [Điều ...]). Nêu căn cứ theo số trang và giữ nguyên mã "
+        "[Điều ...] mà trang trích. Nếu các trang không đủ căn cứ, nói rõ."
     ),
-    context_label="Wiki context",
-    no_context="Không tìm thấy wiki context phù hợp.",
-    extractive_header="Các wiki/raw-source context được truy xuất:",
+    context_label="Trang wiki",
+    no_context="Không tìm thấy trang wiki phù hợp với câu hỏi.",
+    extractive_header="Các trang wiki được chọn:",
+    context_chars=WIKI_CONTEXT_CHARS,
 )
 
 
@@ -57,7 +60,9 @@ def answer_question(service: str, request: AskRequest, retrieve: Retriever, styl
     with timer_ms() as elapsed:
         try:
             contexts = retrieve(request.question, request.top_k, request.candidate_k)
-            if request.use_llm:
+            if not contexts:
+                answer_text, token_usage = style.no_context, {}
+            elif request.use_llm:
                 answer_text, token_usage = _answer_with_llm(request.question, contexts, style)
             else:
                 answer_text, token_usage = extractive_answer(contexts, style), {}
@@ -91,7 +96,7 @@ def extractive_answer(contexts: List[ContextItem], style: PromptStyle) -> str:
 
 def build_prompt(question: str, contexts: List[ContextItem], style: PromptStyle) -> List[ChatMessage]:
     context_text = "\n\n".join(
-        f"[{index}] {context.title}\nCitation: {context.citation}\n{context.content[:LLM_CONTEXT_CHARS]}"
+        f"[{index}] {context.title}\nCitation: {context.citation}\n{context.content[:style.context_chars]}"
         for index, context in enumerate(contexts, 1)
     )
     prompt = f"{style.instructions}\n\nCâu hỏi: {question}\n\n{style.context_label}:\n{context_text}"

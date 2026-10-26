@@ -2,8 +2,8 @@
 set -eu
 
 if [ "$(id -u)" = "0" ]; then
-  mkdir -p /app/faiss_index /app/hybrid_index /app/wiki_db /app/eval_data /cache
-  chown -R appuser:appuser /app/faiss_index /app/hybrid_index /app/wiki_db /app/eval_data /cache
+  mkdir -p /app/faiss_index /app/hybrid_index /app/eval_data /cache
+  chown -R appuser:appuser /app/faiss_index /app/hybrid_index /app/eval_data /cache
   exec gosu appuser "$0" "$@"
 fi
 

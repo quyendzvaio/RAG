@@ -3,7 +3,7 @@
 Du an nay xay dung he thong RAG cho du lieu phap luat Viet Nam. Muc tieu la so sanh song song hai cach truy xuat:
 
 - Vector RAG: Structure-aware Hybrid RAG voi BM25 + FAISS vector search + reranking.
-- Wiki RAG: Truy xuat tren lop Markdown wiki/raw-source da chuan hoa tu HTML phap luat.
+- Wiki RAG: Tra loi chi tu lop wiki do LLM viet (kieu LLM Wiki cua Karpathy): LLM doc `index.md`, chon trang chu de/van ban roi tra loi tu cac trang do, khong dung BM25.
 
 He thong duoc tach theo kien truc microservice de moi service co database/index rieng, de benchmark chat luong cau tra loi, latency, citation va cac metric danh gia RAG.
 
@@ -23,7 +23,7 @@ Thanh phan chinh:
 
 - `api-gateway`: UI compare mode va cac API `/ask/compare`, `/ask/vector`, `/ask/wiki`.
 - `vector-rag-service`: parent-child — FAISS tim child (cum khoan <= 256 token, co tieu de Dieu), BM25 cham nguyen Dieu, gop va rerank theo Dieu.
-- `wiki-rag-service`: truy xuat tu Markdown wiki/raw-source va SQLite DB rieng.
+- `wiki-rag-service`: chon trang trong `wiki_data/wiki/` bang LLM va tra loi tu cac trang do; tu nap lai khi wiki duoc build lai.
 - `llm-service`: adapter goi DeepSeek API.
 - `evaluator-service`: luu logs va tinh metrics danh gia RAG.
 
@@ -36,7 +36,7 @@ Thanh phan chinh:
 - BM25 lexical search
 - Sentence Transformers cho embedding tieng Viet
 - DeepSeek API cho answer synthesis
-- SQLite cho wiki DB va evaluation logs
+- SQLite cho evaluation logs
 - Docker Compose cho dong goi va chay he thong
 
 Embedding mac dinh:
@@ -79,11 +79,11 @@ Nhan xet:
 ## Cau Truc Du Lieu
 
 - `data_raw/`: HTML phap luat goc, la source of truth.
-- `wiki_data/raw_sources/`: Markdown/raw-source sinh tu `data_raw`.
+- `wiki_data/raw_sources/`: Markdown/raw-source sinh tu `data_raw` (dau vao de viet wiki).
+- `wiki_data/wiki/`: cac trang wiki do LLM viet (`make build-wiki-layer`).
 - Docker volumes:
   - `vector_faiss_index`: FAISS index.
   - `vector_hybrid_index`: BM25 index va manifest.
-  - `wiki_db`: SQLite DB cho wiki service.
   - `eval_data`: logs va metrics.
   - `model_cache`: cache model embedding.
 
@@ -131,10 +131,10 @@ Build vector index:
 make docker-build-vector-index
 ```
 
-Ingest wiki DB:
+Viet lop wiki bang LLM cho cac de muc can dung (ton token; wiki service chi tra loi duoc cac de muc da build):
 
 ```bash
-make docker-ingest-wiki
+make build-wiki-layer SOURCES="aec013b7 059ac230 62aa0284"
 ```
 
 Chay toan bo he thong:
@@ -192,11 +192,11 @@ make eval-retrieval EVAL_TAG=baseline              # can stack dang chay
 make eval-retrieval EVAL_TAG=moi ARGS="--compare baseline"
 ```
 
-Script goi `/ask/vector` va `/ask/wiki` voi `use_llm=false`, tinh Recall@1, Recall@5, MRR va latency cho cau hoi co dau va khong dau, luu ket qua vao `eval/results/<tag>.json`.
+Script goi `/ask/vector` va `/ask/wiki` voi `use_llm=false` (wiki van goi LLM de chon trang), tinh Recall@1, Recall@5, MRR va latency cho cau hoi co dau va khong dau, luu ket qua vao `eval/results/<tag>.json`.
 
 ## Ghi Chu Van Hanh
 
-- Lan khoi dong dau co the mat vai giay de preload vector index va wiki cache.
+- Lan khoi dong dau co the mat vai giay de preload vector index va lop wiki.
 - Retrieval-only thuong nhanh hon nhieu so voi cau hoi co LLM.
 - Neu khong muon goi DeepSeek, dat `use_llm=false` khi goi API.
 - Khong commit file `.env` len GitHub.

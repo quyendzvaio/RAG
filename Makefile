@@ -1,7 +1,7 @@
 COMPOSE ?= docker compose
 EVAL_TAG ?= latest
 
-.PHONY: prepare-wiki-sources docker-build docker-up docker-down docker-logs docker-vector-logs docker-wiki-logs docker-build-vector-index docker-ingest-wiki build-wiki-layer docker-rebuild-all-data docker-clean-volumes eval-golden eval-retrieval analyze-ingestion
+.PHONY: prepare-wiki-sources docker-build docker-up docker-down docker-logs docker-vector-logs docker-wiki-logs docker-build-vector-index build-wiki-layer docker-rebuild-all-data docker-clean-volumes eval-golden eval-retrieval analyze-ingestion
 
 # Chay trong container (host khong can langchain); ghi ra ./wiki_data/raw_sources.
 prepare-wiki-sources:
@@ -29,15 +29,12 @@ docker-wiki-logs:
 docker-build-vector-index:
 	$(COMPOSE) run --rm --remove-orphans vector-rag-service python create_faiss.py
 
-docker-ingest-wiki:
-	$(COMPOSE) run --rm --remove-orphans wiki-rag-service python -m services.wiki_rag_service.ingest
-
-# Lop wiki do LLM viet (thu nghiem) cho cac de muc chon, vd: make build-wiki-layer SOURCES="aec013b7 059ac230".
-# Can llm-service dang chay (make docker-up) va image da build lai sau khi them build_wiki.py.
+# Lop wiki do LLM viet cho cac de muc chon, vd: make build-wiki-layer SOURCES="aec013b7 059ac230".
+# wiki-rag-service chi tra loi tu lop nay va tu nap lai khi index.md doi. Can llm-service dang chay.
 build-wiki-layer:
 	$(COMPOSE) run --rm --no-deps --remove-orphans -v ./wiki_data:/app/wiki_data vector-rag-service python build_wiki.py $(SOURCES)
 
-docker-rebuild-all-data: prepare-wiki-sources docker-build-vector-index docker-ingest-wiki
+docker-rebuild-all-data: prepare-wiki-sources docker-build-vector-index
 
 docker-clean-volumes:
 	$(COMPOSE) down -v --remove-orphans

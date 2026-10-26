@@ -1,7 +1,8 @@
 """Danh gia retrieval cua vector va wiki service tren golden set.
 
 Goi gateway (/ask/vector, /ask/wiki) voi use_llm=false. Mot cau tra loi dung khi context
-co cung (source_file, article_code) voi Dieu goc. Chi dung thu vien chuan.
+co cung (source_file, article_code) voi Dieu goc; voi trang wiki (nhieu Dieu) khi Dieu goc nam trong
+`article_codes` cua trang. Wiki service van goi LLM de chon trang, ke ca use_llm=false. Chi dung thu vien chuan.
 
     python3 scripts/eval_retrieval.py --tag baseline
     python3 scripts/eval_retrieval.py --tag refactor --compare baseline
@@ -44,7 +45,8 @@ def context_key(context: dict) -> list:
 def first_hit_rank(contexts: list, row: dict):
     for rank, context in enumerate(contexts, start=1):
         metadata = context.get("metadata", {})
-        if metadata.get("source_file") == row["source_file"] and metadata.get("article_code") == row["article_code"]:
+        codes = metadata.get("article_codes") or [metadata.get("article_code")]
+        if metadata.get("source_file") == row["source_file"] and row["article_code"] in codes:
             return rank
     return None
 
