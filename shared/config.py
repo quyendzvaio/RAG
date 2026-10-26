@@ -72,6 +72,7 @@ class Paths:
     faiss_dir: str
     hybrid_dir: str
     raw_sources_dir: str
+    wiki_dir: str
     wiki_db: str
     eval_db: str
 
@@ -134,6 +135,7 @@ def get_settings() -> Settings:
             faiss_dir="faiss_index",
             hybrid_dir="hybrid_index",
             raw_sources_dir=_env("RAW_SOURCES_DIR", "wiki_data/raw_sources"),
+            wiki_dir=_env("WIKI_DIR", "wiki_data/wiki"),
             wiki_db=_env("WIKI_DB_PATH", "wiki_db/wiki.db"),
             eval_db=_env("EVAL_DB_PATH", "eval_data/eval.db"),
         ),
