@@ -83,6 +83,10 @@ class Paths:
     def index_manifest(self) -> str:
         return os.path.join(self.hybrid_dir, "index_manifest.json")
 
+    @property
+    def parents(self) -> str:
+        return os.path.join(self.hybrid_dir, "parents.jsonl")
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -105,13 +109,13 @@ def get_settings() -> Settings:
             backend=_env("EMBEDDING_BACKEND", "sentence-transformers").lower(),
             profile=profile,
             model=_env("EMBEDDING_MODEL", EMBEDDING_PROFILES.get(profile, EMBEDDING_PROFILES["vietnamese"])),
-            device=_env("EMBEDDING_DEVICE", "cpu").lower(),
+            device=_env("EMBEDDING_DEVICE", "auto").lower(),
             batch_size=int(_env("EMBEDDING_BATCH_SIZE", "8")),
             hashing_dim=int(_env("HASHING_EMBEDDING_DIM", "384")),
         ),
         reranker=RerankerSettings(
             model=_env("RERANKER_MODEL", ""),
-            device=_env("RERANKER_DEVICE", "cpu").lower(),
+            device=_env("RERANKER_DEVICE", "auto").lower(),
             batch_size=int(_env("RERANKER_BATCH_SIZE", "4")),
         ),
         deepseek=DeepSeekSettings(

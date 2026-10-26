@@ -13,7 +13,7 @@ from shared.schemas import AskRequest, ChatMessage, ChatRequest, ContextItem, Se
 # (query, top_k, candidate_k) -> contexts
 Retriever = Callable[[str, int, int], List[ContextItem]]
 
-LLM_CONTEXT_CHARS = 1800
+LLM_CONTEXT_CHARS = 6000  # = PARENT_CONTEXT_CHARS cua vector service: gui nguyen Dieu cho LLM
 EXTRACTIVE_CONTEXT_CHARS = 500
 
 

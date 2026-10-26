@@ -22,7 +22,7 @@ API Gateway
 Thanh phan chinh:
 
 - `api-gateway`: UI compare mode va cac API `/ask/compare`, `/ask/vector`, `/ask/wiki`.
-- `vector-rag-service`: BM25 + FAISS + reranking tren chunk phap ly co cau truc.
+- `vector-rag-service`: parent-child — FAISS tim child (cum khoan <= 256 token, co tieu de Dieu), BM25 cham nguyen Dieu, gop va rerank theo Dieu.
 - `wiki-rag-service`: truy xuat tu Markdown wiki/raw-source va SQLite DB rieng.
 - `llm-service`: adapter goi DeepSeek API.
 - `evaluator-service`: luu logs va tinh metrics danh gia RAG.

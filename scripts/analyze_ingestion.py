@@ -1,10 +1,12 @@
-"""Phan tich ingestion + chunking + embedding input + wiki lookup tren du lieu that.
+"""Phan tich ingestion + chunking parent-child + embedding input + wiki records tren du lieu that.
 
 Can langchain/transformers nen chay trong image (xem `make analyze-ingestion`).
 """
 import collections, json, re, statistics, sys
 sys.path.insert(0, "/app")
-from rag.data_loader import load_html_documents, split_documents
+from rag.chunking import split_parent_child
+from rag.data_loader import APPENDIX_HEADING_RE, DOC_TYPE_BY_CODE, DOC_TYPE_CODE_RE, load_html_documents
+from rag.query_engine import PARENT_CONTEXT_CHARS
 
 def pct(a, b): return f"{a} ({100*a/max(b,1):.1f}%)"
 def q(vals, p): s = sorted(vals); return s[min(int(p/100*len(s)), len(s)-1)]
@@ -12,91 +14,65 @@ def q(vals, p): s = sorted(vals); return s[min(int(p/100*len(s)), len(s)-1)]
 docs = load_html_documents("data_raw")
 N = len(docs)
 print("== INGESTION ==")
-print("Dieu:", N)
-fallback = [d for d in docs if "article_code" not in d.metadata]
-print("document fallback (file khong co pDieu):", len(fallback), "| tong ky tu:", sum(len(d.page_content) for d in fallback))
-
-app = [d for d in docs if re.search(r"^PHỤ LỤC\b|\nPHỤ LỤC\b|\nPhụ lục [IVX\d]+\n", d.page_content)]
-print("Dieu chua PHU LUC dinh kem:", len(app), "| tong ky tu:", sum(len(d.page_content) for d in app),
-      f"({100*sum(len(d.page_content) for d in app)/sum(len(d.page_content) for d in docs):.1f}% toan bo du lieu)")
-
-# doc_type: so voi ma loai trong article_code (vd 39.4.NĐ.8 -> NĐ)
-code_map = {"LQ": "Luật", "NĐ": "Nghị định", "TT": "Thông tư", "QĐ": "Quyết định"}
-mism = collections.Counter(); seen = collections.Counter()
+parts = collections.Counter(d.metadata.get("part") for d in docs)
+print("parent:", N, dict(parts))
+print("parent khong co article_code (fallback):", sum("article_code" not in d.metadata for d in docs))
+left = [d for d in docs if d.metadata.get("part") == "article" and any(APPENDIX_HEADING_RE.match(l) for l in d.page_content.split("\n"))]
+print("Dieu van con dong tieu de PHU LUC trong noi dung:", len(left))
+apx = [d for d in docs if d.metadata.get("part") == "appendix"]
+print("phu luc: ky tu median", statistics.median(len(d.page_content) for d in apx) if apx else 0,
+      "| max", max((len(d.page_content) for d in apx), default=0))
+mism = collections.Counter()
 for d in docs:
-    m = re.search(r"\.(LQ|NĐ|TT|QĐ|PL|TL|NQ|CT|BL|LT|TTLT)\.", d.metadata.get("article_code", ""))
-    if not m: continue
-    code = m.group(1); seen[code] += 1
-    expect = code_map.get(code, "")
+    m = DOC_TYPE_CODE_RE.search(d.metadata.get("article_code", ""))
+    expect = DOC_TYPE_BY_CODE[m.group(1)] if m else ""
     if d.metadata.get("doc_type", "") != expect:
-        mism[(code, d.metadata.get("doc_type", "") or "(rong)")] += 1
-print("ma loai van ban trong article_code:", dict(seen))
-print("doc_type sai so voi ma loai:", sum(mism.values()), mism.most_common(8))
-
-dup = collections.Counter(d.page_content.split("\n", 3)[-1][:400] for d in docs if len(d.page_content) > 300)
-print("Dieu co noi dung trung lap (cung 400 ky tu dau sau tieu de):", sum(c - 1 for c in dup.values() if c > 1))
+        mism[(m.group(1) if m else "(khong ma)", d.metadata.get("doc_type", "") or "(rong)")] += 1
+print("doc_type", collections.Counter(d.metadata.get("doc_type") or "(rong)" for d in docs).most_common())
+print("doc_type sai so voi ma loai:", sum(mism.values()), mism.most_common(5))
 rel = [d for d in docs if d.metadata.get("related_text")]
-print("Dieu co related_text (pChiDan) nam trong page_content:", pct(len(rel), N))
+print("Dieu co related_text:", pct(len(rel), N), "| con nam trong page_content:",
+      sum(d.metadata["related_text"][:80] in d.page_content for d in rel))
+heads = collections.Counter((d.metadata.get("source_file"), d.metadata.get("article_code"), d.metadata.get("article_title")) for d in docs)
+print("tieu de trung nhau trong cung file:", sum(c - 1 for c in heads.values() if c > 1))
+lens = [len(d.page_content) for d in docs]
+print("ky tu/parent: median", statistics.median(lens), "p90", q(lens, 90), "p99", q(lens, 99),
+      f"| > {PARENT_CONTEXT_CHARS} (context chi lay child lien quan):", pct(sum(l > PARENT_CONTEXT_CHARS for l in lens), N))
 
-print("\n== CHUNKING ==")
-chunks = split_documents(docs)
-C = len(chunks)
-lens = [len(c.page_content) for c in chunks]
-print("chunk:", C, "| ky tu median", statistics.median(lens), "p90", q(lens, 90), "| < 200 ky tu:", pct(sum(l < 200 for l in lens), C))
-per_doc = collections.Counter((c.metadata["source_file"], c.metadata.get("article_index")) for c in chunks)
-print("chunk/Dieu: 1 chunk:", pct(sum(v == 1 for v in per_doc.values()), len(per_doc)), "| >10 chunk:", sum(v > 10 for v in per_doc.values()), "| max:", max(per_doc.values()))
-def has_header(c):
-    code = c.metadata.get("article_code")
-    return bool(code) and code in c.page_content
-nohdr = sum(not has_header(c) for c in chunks)
-print("chunk KHONG chua ma Dieu trong text (embedding khong biet thuoc Dieu nao):", pct(nohdr, C))
-bad_end = sum(1 for c in chunks if not re.search(r"[.;:!?)\]”\"]\s*$", c.page_content.strip()))
-print("chunk ket thuc giua cau:", pct(bad_end, C))
-meta_bytes = [len(json.dumps(c.metadata, ensure_ascii=False).encode()) for c in chunks]
-text_bytes = [len(c.page_content.encode()) for c in chunks]
-print(f"metadata/chunk: median {statistics.median(meta_bytes)} B | tong metadata {sum(meta_bytes)/1e6:.1f} MB vs text {sum(text_bytes)/1e6:.1f} MB")
-heavy = sum(len(json.dumps({k: c.metadata.get(k) for k in ('urls','related_urls','related_text','legal_note')}, ensure_ascii=False).encode()) for c in chunks)
-print(f"  trong do urls/related_*/legal_note lap lai o moi chunk: {heavy/1e6:.1f} MB")
-
-# BM25: tu khoa bi dem 2 lan vi metadata vua nam trong page_content vua duoc noi them
-c0 = next(c for c in chunks if c.metadata.get("legal_note"))
-print("legal_note xuat hien trong page_content cua chunk dau Dieu:", c0.metadata["legal_note"][:40] in c0.page_content)
-
-print("\n== EMBEDDING INPUT ==")
+print("\n== CHUNKING (parent-child) + EMBEDDING INPUT ==")
 try:
     from sentence_transformers import SentenceTransformer
-    name = "bkai-foundation-models/vietnamese-bi-encoder"
-    model = SentenceTransformer(name, device="cpu")
-    print("max_seq_length:", model.max_seq_length)
+    model = SentenceTransformer("bkai-foundation-models/vietnamese-bi-encoder", device="cpu")
     tok = model.tokenizer
-    sample = chunks[:: max(C // 2000, 1)]
-    ntok = [len(tok(c.page_content, add_special_tokens=True)["input_ids"]) for c in sample]
-    print(f"token/chunk (mau {len(sample)}): median {statistics.median(ntok)} p90 {q(ntok,90)} | > max_seq_length (bi cat duoi):",
-          pct(sum(n > model.max_seq_length for n in ntok), len(sample)))
-    kept = [min(1.0, model.max_seq_length / n) for n in ntok]
-    print(f"ty le noi dung chunk thuc su duoc embed: trung binh {100*statistics.mean(kept):.0f}%")
-    s = "Đối tượng áp dụng hiến lấy ghép mô"
-    print("tokenize khong tach tu:", tok.tokenize(s))
-    print("tokenize da tach tu   :", tok.tokenize("Đối_tượng áp_dụng hiến lấy ghép mô"))
-    unk = sum(t == tok.unk_token for c in sample[:300] for t in tok.tokenize(c.page_content[:1000]))
-    print("so token <unk> trong 300 chunk mau:", unk)
+    def count(text): return len(tok(text, add_special_tokens=False, verbose=False)["input_ids"])
+    max_tokens = model.max_seq_length
 except Exception as exc:
-    print("khong phan tich duoc tokenizer:", exc)
+    print("khong tai duoc tokenizer, uoc luong theo ky tu:", exc)
+    def count(text): return len(text) // 3 + 1
+    max_tokens = 256
+children = split_parent_child(docs, count, max_tokens)
+C = len(children)
+ntok = [count(c.page_content) + 2 for c in children]
+print("max_seq_length:", max_tokens, "| child:", C, "| token/child median", statistics.median(ntok), "p90", q(ntok, 90),
+      "max", max(ntok), "| > max_seq_length (bi cat duoi):", pct(sum(n > max_tokens for n in ntok), C))
+per_parent = collections.Counter(c.metadata["parent_id"] for c in children)
+print("child/parent: 1 child:", pct(sum(v == 1 for v in per_parent.values()), len(per_parent)),
+      "| median", statistics.median(per_parent.values()), "| max", max(per_parent.values()))
+print("parent khong co child:", N - len(per_parent))
+nohdr = sum(not c.page_content.startswith(c.metadata["article_code"]) for c in children)
+print("child KHONG bat dau bang ma Dieu:", pct(nohdr, C))
+short = sum(n < 40 for n in ntok)
+print("child < 40 token:", pct(short, C))
+bad_end = sum(1 for c in children if not re.search(r"[.;:!?)\]”\"…]\s*$", c.page_content.strip()))
+print("child ket thuc giua cau:", pct(bad_end, C))
+meta_bytes = [len(json.dumps(c.metadata, ensure_ascii=False).encode()) for c in children]
+text_bytes = [len(c.page_content.encode()) for c in children]
+print(f"metadata/child: median {statistics.median(meta_bytes)} B | tong metadata {sum(meta_bytes)/1e6:.1f} MB vs text {sum(text_bytes)/1e6:.1f} MB")
 
-print("\n== WIKI LOOKUP (## heading) ==")
-recs = [json.loads(l) for l in open("wiki_data/raw_sources/articles.jsonl")]
-cache = {}; wrong = 0; missing = 0; truncated = 0
-for r in recs:
-    path = "wiki_data/raw_sources/" + r["source_markdown"]
-    text = cache.setdefault(path, open(path, encoding="utf-8").read())
-    marker = f"## {r['article_heading']}"
-    start = text.find(marker)
-    if start < 0: missing += 1; continue
-    line_end = text.find("\n", start)
-    if text[start:line_end].strip() != marker.strip(): wrong += 1; continue
-    idx = re.search(r"- Article index: (\d+)", text[start:start + 600])
-    if idx and int(idx.group(1)) != r["metadata"]["article_index"]: wrong += 1; continue
-    nxt = text.find("\n## ", start + len(marker)); sec = text[start: nxt if nxt >= 0 else len(text)]
-    if len(sec) > 3000: truncated += 1
-print("Dieu wiki tra ve NHAM Dieu khac:", wrong, "| khong tim thay:", missing, "| bi cat 3000 ky tu:", pct(truncated, len(recs)))
-print("wiki BM25 chi index content_preview (500 ky tu) — Dieu dai hon 500 ky tu:", pct(sum(len(d.page_content) > 500 for d in docs), N))
+print("\n== WIKI RECORDS ==")
+try:
+    recs = [json.loads(l) for l in open("wiki_data/raw_sources/articles.jsonl", encoding="utf-8")]
+    print("record:", len(recs), "| co full content:", pct(sum(bool(r.get("content")) for r in recs), len(recs)),
+          "| content dai hon preview 500 ky tu:", pct(sum(len(r.get("content", "")) > 500 for r in recs), len(recs)))
+except FileNotFoundError:
+    print("chua co wiki_data/raw_sources/articles.jsonl (make prepare-wiki-sources)")

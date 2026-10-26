@@ -1,6 +1,6 @@
 import hashlib
 import logging
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
 
 from langchain_core.embeddings import Embeddings
 
@@ -9,6 +9,9 @@ from shared.config import EmbeddingSettings, get_settings
 
 
 logger = logging.getLogger(__name__)
+
+HASHING_MAX_TOKENS = 256  # HashingEmbeddings khong co gioi han; dung cung cua so voi model that
+CHARS_PER_TOKEN = 3  # uoc luong khi khong co tokenizer
 
 
 class HashingEmbeddings(Embeddings):
@@ -87,3 +90,17 @@ def embedding_config(embedding_model) -> Dict[str, str]:
         "model": config.model,
         "dimensions": "",
     }
+
+
+def token_counter(embedding_model) -> Tuple[Callable[[str], int], int]:
+    """(ham dem token khong tinh special token, max_seq_length) cua embedding model."""
+    client = getattr(embedding_model, "client", None)
+    tokenizer = getattr(client, "tokenizer", None)
+    max_tokens = getattr(client, "max_seq_length", None)
+    if tokenizer is None or not max_tokens:
+        return (lambda text: len(text) // CHARS_PER_TOKEN + 1), HASHING_MAX_TOKENS
+
+    def count(text: str) -> int:
+        return len(tokenizer(text, add_special_tokens=False, verbose=False)["input_ids"])
+
+    return count, int(max_tokens)

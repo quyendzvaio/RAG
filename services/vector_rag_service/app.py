@@ -53,6 +53,7 @@ def index_status():
         "status": "ready",
         "manifest": store.manifest,
         "faiss_ntotal": store.vectorstore.index.ntotal,
+        "parents": len(store.parents),
         "bm25_docs": store.bm25_store.total_docs,
     }
 
@@ -97,12 +98,13 @@ def _retrieve(query: str, top_k: int, candidate_k: int) -> List[ContextItem]:
 
 
 def _to_context(ranked_doc: RankedDocument, index: int) -> ContextItem:
-    metadata = ranked_doc.document.metadata or {}
+    metadata = dict(ranked_doc.document.metadata or {})
+    metadata["matched_children"] = ranked_doc.matched_children
     return ContextItem(
-        id=str(metadata.get("chunk_id", index)),
+        id=str(metadata.get("parent_id", index)),
         source=metadata.get("source", ""),
         title=article_heading(metadata),
-        content=ranked_doc.document.page_content,
+        content=ranked_doc.context or ranked_doc.document.page_content,
         metadata=metadata,
         score=ranked_doc.score,
         citation=metadata.get("legal_note") or metadata.get("source") or f"vector-context-{index}",

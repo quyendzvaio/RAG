@@ -1,12 +1,18 @@
-"""Hybrid search cho vector-rag-service: FAISS + BM25 -> reciprocal rank fusion -> rerank."""
+"""Hybrid search cho vector-rag-service, o cap parent (Dieu/Phu luc).
+
+FAISS tim child -> gom ve parent (diem cua child tot nhat); BM25 cham truc tiep parent;
+reciprocal rank fusion -> rerank tren doan context se gui cho LLM.
+"""
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
-from typing import Dict, Iterable, List, Optional, Tuple
+from itertools import chain
+from typing import Dict, Iterable, Iterator, List, Optional, Tuple
 
 from langchain_core.documents import Document
 
 from rag.bm25_store import document_key, tokenize
+from rag.chunking import child_body
 from rag.device import choose_torch_device
 from rag.vector_store import HybridStore
 from shared.config import RerankerSettings, get_settings
@@ -17,7 +23,9 @@ logger = logging.getLogger(__name__)
 VECTOR_WEIGHT = 0.55
 BM25_WEIGHT = 0.45
 RRF_K = 60  # hang so cua reciprocal rank fusion: weight / (rank + RRF_K)
-RERANK_WEIGHT = 0.65  # diem cuoi = RERANK_WEIGHT * rerank chuan hoa + phan con lai * diem fusion
+RERANK_WEIGHT = 0.65  # diem cuoi = RERANK_WEIGHT * rerank chuan hoa + phan con lai * fusion chuan hoa
+CHILD_FANOUT = 4  # FAISS tra ve candidate_k * CHILD_FANOUT child truoc khi gom theo parent
+PARENT_CONTEXT_CHARS = 6000  # parent dai hon thi context chi gom cac child lien quan
 RERANK_METADATA_KEYS = (
     "chapter",
     "chapter_title",
@@ -31,11 +39,13 @@ RERANK_METADATA_KEYS = (
 
 @dataclass
 class RankedDocument:
-    document: Document
+    document: Document  # parent
     score: float
     vector_rank: Optional[int] = None
     bm25_rank: Optional[int] = None
     rerank_score: Optional[float] = None
+    matched_children: List[int] = field(default_factory=list)  # child_index trung vector, tot nhat truoc
+    context: str = ""  # doan noi dung parent tra ve cho LLM
 
 
 class CrossEncoderReranker:
@@ -58,10 +68,10 @@ class CrossEncoderReranker:
             logger.warning("Khong tai duoc neural reranker '%s', dung lexical rerank. Loi: %s", self.model_name, exc)
             self.model = None
 
-    def score(self, query: str, documents: List[Document]) -> Optional[List[float]]:
-        if self.model is None or not documents:
+    def score(self, query: str, texts: List[str]) -> Optional[List[float]]:
+        if self.model is None or not texts:
             return None
-        pairs = [(query, _rerank_text(document)) for document in documents]
+        pairs = [(query, text) for text in texts]
         scores = self.model.predict(pairs, batch_size=self.batch_size)
         return [float(score) for score in scores]
 
@@ -72,34 +82,63 @@ def get_reranker() -> CrossEncoderReranker:
 
 
 def hybrid_search(question: str, store: HybridStore, top_k: int = 5, candidate_k: int = 40) -> List[RankedDocument]:
-    vector_hits = _vector_search(store, question, candidate_k)
-    bm25_hits = store.bm25_store.search_with_scores(question, top_k=candidate_k)
+    vector_hits, bm25_hits, matched = candidate_hits(question, store, candidate_k)
 
     candidates: Dict[str, RankedDocument] = {}
     _merge_ranked_hits(candidates, vector_hits, "vector", VECTOR_WEIGHT)
     _merge_ranked_hits(candidates, bm25_hits, "bm25", BM25_WEIGHT)
+    for key, candidate in candidates.items():
+        candidate.matched_children = matched.get(key, [])
 
     fused = sorted(candidates.values(), key=lambda item: item.score, reverse=True)
-    return rerank(question, fused[:candidate_k])[:top_k]
+    return rerank(question, store, fused[:candidate_k])[:top_k]
 
 
-def rerank(question: str, candidates: List[RankedDocument]) -> List[RankedDocument]:
+def candidate_hits(
+    question: str, store: HybridStore, candidate_k: int
+) -> Tuple[List[Tuple[Document, float]], List[Tuple[Document, float]], Dict[str, List[int]]]:
+    """(parent theo vector, parent theo BM25, parent_id -> child_index trung vector)."""
+    child_hits = _vector_search(store, question, candidate_k * CHILD_FANOUT)
+    vector_hits: List[Tuple[Document, float]] = []
+    matched: Dict[str, List[int]] = {}
+    for child, distance in child_hits:
+        parent_id = child.metadata["parent_id"]
+        if parent_id not in matched:
+            matched[parent_id] = []
+            vector_hits.append((store.parents[parent_id], distance))
+        matched[parent_id].append(child.metadata["child_index"])
+    bm25_hits = store.bm25_store.search_with_scores(question, top_k=candidate_k)
+    return vector_hits[:candidate_k], bm25_hits, matched
+
+
+def rerank(question: str, store: HybridStore, candidates: List[RankedDocument]) -> List[RankedDocument]:
     if not candidates:
         return []
 
-    documents = [candidate.document for candidate in candidates]
-    scores = get_reranker().score(question, documents)
+    for candidate in candidates:
+        candidate.context = context_text(question, store, candidate)
+    texts = [_rerank_text(candidate.document.metadata, candidate.context) for candidate in candidates]
+    scores = get_reranker().score(question, texts)
     if scores is None:
-        scores = [_lexical_rerank_score(question, document) for document in documents]
+        scores = [
+            _lexical_rerank_score(question, text, candidate.document.metadata)
+            for text, candidate in zip(texts, candidates)
+        ]
 
-    min_score = min(scores)
-    score_range = max(max(scores) - min_score, 1e-9)
-    for candidate, score in zip(candidates, scores):
+    # Ca hai diem deu min-max ve [0, 1] tren tap ung vien: diem RRF tho chi ~0.01, khong chuan hoa
+    # thi phan fusion gan nhu khong anh huong thu tu.
+    fused = _min_max([candidate.score for candidate in candidates])
+    for candidate, score, normalized, fused_score in zip(candidates, scores, _min_max(scores), fused):
         candidate.rerank_score = score
-        normalized = (score - min_score) / score_range
-        candidate.score = RERANK_WEIGHT * normalized + (1 - RERANK_WEIGHT) * candidate.score
+        candidate.score = RERANK_WEIGHT * normalized + (1 - RERANK_WEIGHT) * fused_score
 
     return sorted(candidates, key=lambda item: item.score, reverse=True)
+
+
+def _min_max(values: List[float]) -> List[float]:
+    low = min(values)
+    spread = max(max(values) - low, 1e-9)
+    return [(value - low) / spread for value in values]
 
 
 def _vector_search(store: HybridStore, question: str, candidate_k: int) -> List[Tuple[Document, float]]:
@@ -126,16 +165,57 @@ def _merge_ranked_hits(
         setattr(candidate, f"{source}_rank", rank)
 
 
-def _rerank_text(document: Document) -> str:
-    metadata = document.metadata
+def context_text(question: str, store: HybridStore, ranked: RankedDocument) -> str:
+    """Ca parent neu du ngan; neu khong thi cac child lien quan nhat, giu thu tu trong Dieu.
+
+    Uu tien: child trung vector, roi child ke ben chung, roi child khop tu khoa nhat.
+    """
+    parent = ranked.document
+    if len(parent.page_content) <= PARENT_CONTEXT_CHARS:
+        return parent.page_content
+    children = store.children.get(parent.metadata["parent_id"], [])
+    if not children:
+        return parent.page_content[:PARENT_CONTEXT_CHARS]
+
+    def by_keyword() -> Iterator[int]:
+        # Chi tinh khi child trung vector va child ke ben chua lap day context.
+        yield from sorted(
+            range(len(children)),
+            key=lambda index: -_lexical_rerank_score(question, children[index].page_content, {}),
+        )
+
+    neighbors = [index + step for index in ranked.matched_children for step in (-1, 1)]
+    selected: List[int] = []
+    used = 0
+    for index in chain(ranked.matched_children, neighbors, by_keyword()):
+        if index in selected or not 0 <= index < len(children):
+            continue
+        size = len(child_body(children[index]))
+        if selected and used + size > PARENT_CONTEXT_CHARS:
+            if used >= PARENT_CONTEXT_CHARS * 0.9:
+                break
+            continue
+        selected.append(index)
+        used += size
+
+    parts: List[str] = []
+    previous = None
+    for index in sorted(selected):
+        if previous is not None and index != previous + 1:
+            parts.append("…")
+        parts.append(child_body(children[index]))
+        previous = index
+    return "\n".join(parts)
+
+
+def _rerank_text(metadata: dict, content: str) -> str:
     prefix = " ".join(str(metadata[key]) for key in RERANK_METADATA_KEYS if metadata.get(key))
-    return f"{prefix}\n{document.page_content}"
+    return f"{prefix}\n{content}"
 
 
-def _lexical_rerank_score(question: str, document: Document) -> float:
+def _lexical_rerank_score(question: str, text: str, metadata: dict) -> float:
     """Diem thay CrossEncoder: do phu token, khop cum 2-4 token va boost metadata."""
     query_tokens = tokenize(question)
-    text = _rerank_text(document)
     text_tokens = tokenize(text)
     if not query_tokens or not text_tokens:
         return 0.0
@@ -154,7 +234,7 @@ def _lexical_rerank_score(question: str, document: Document) -> float:
 
     metadata_boost = 0.0
     for key in ("article_code", "legal_note", "doc_type", "effective_date"):
-        value = str(document.metadata.get(key, "")).lower()
+        value = str(metadata.get(key, "")).lower()
         if value and any(token in value for token in query_set):
             metadata_boost += 0.08
 

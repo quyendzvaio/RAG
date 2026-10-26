@@ -9,16 +9,14 @@ from langchain_core.documents import Document
 
 
 TOKEN_RE = re.compile(r"[\wÀ-ỹ]+", re.UNICODE)
+# page_content cua parent chi la noi dung Dieu, nen moi truong duoi day chi duoc dem mot lan.
 SEARCHABLE_METADATA_KEYS = (
-    "chapter",
-    "chapter_title",
     "article_code",
     "article_title",
+    "chapter",
+    "chapter_title",
     "legal_note",
     "doc_type",
-    "effective_date",
-    "source",
-    "related_text",
 )
 
 
@@ -82,10 +80,10 @@ class BM25Index:
 
 
 class BM25Store(BM25Index):
-    """BM25 tren cac chunk cua vector index.
+    """BM25 tren cac parent (Dieu/Phu luc) cua hybrid index.
 
-    Pickle chi luu term stats va `document_keys`; document duoc gan lai tu FAISS docstore
-    khi load (`attach_documents`), nen hai index phai cung mot lan build.
+    Pickle chi luu term stats va `document_keys`; parent duoc gan lai tu `parents.jsonl`
+    khi load (`attach_documents`), nen hai file phai cung mot lan build.
     """
 
     version = 2
@@ -107,7 +105,7 @@ class BM25Store(BM25Index):
         for index, document in enumerate(self._documents[:20]):
             if document_key(document, index) != self.document_keys[index]:
                 raise ValueError(
-                    "BM25/document store mismatch: thu tu hoac chunk_id khong khop. "
+                    "BM25/document store mismatch: thu tu hoac khoa document khong khop. "
                     "Hay rebuild lai hybrid index."
                 )
 
@@ -123,10 +121,12 @@ class BM25Store(BM25Index):
 
 
 def document_key(document: Document, fallback_index: Optional[int] = None) -> str:
-    """Khoa dinh danh mot chunk: chunk_id neu co, neu khong thi source|article."""
+    """Khoa dinh danh: chunk_id cua child, parent_id cua parent, neu khong thi source|article."""
     metadata = document.metadata or {}
     if "chunk_id" in metadata:
         return str(metadata["chunk_id"])
+    if "parent_id" in metadata:
+        return str(metadata["parent_id"])
     key = "|".join(
         str(metadata.get(name, "")) for name in ("source", "article_code", "article_index")
     ).strip("|")

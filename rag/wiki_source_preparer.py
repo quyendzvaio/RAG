@@ -13,7 +13,7 @@ from langchain_core.documents import Document
 from rag.data_loader import article_heading, parse_legal_html
 
 
-def prepare_wiki_sources(input_dir: str, output_dir: str, include_jsonl_content: bool = False) -> Dict[str, int]:
+def prepare_wiki_sources(input_dir: str, output_dir: str) -> Dict[str, int]:
     input_path = Path(input_dir)
     output_path = Path(output_dir)
     sources_dir = output_path / "sources"
@@ -65,7 +65,7 @@ def prepare_wiki_sources(input_dir: str, output_dir: str, include_jsonl_content:
             )
 
             for document in documents:
-                record = _document_record(document, source_hash, source_md_name, include_content=include_jsonl_content)
+                record = _document_record(document, source_hash, source_md_name)
                 records_file.write(json.dumps(record, ensure_ascii=False) + "\n")
 
             doc_types = sorted({doc.metadata.get("doc_type", "") for doc in documents if doc.metadata.get("doc_type")})
@@ -177,7 +177,7 @@ def _write_source_markdown(
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
-def _document_record(document: Document, source_hash: str, source_markdown: str, include_content: bool) -> Dict:
+def _document_record(document: Document, source_hash: str, source_markdown: str) -> Dict:
     metadata = dict(document.metadata)
     record = {
         "id": f"{Path(metadata.get('source_file', metadata.get('source', 'source'))).stem}:{metadata.get('article_index', '')}",
@@ -187,9 +187,8 @@ def _document_record(document: Document, source_hash: str, source_markdown: str,
         "metadata": metadata,
         "content_hash": _sha256_bytes(document.page_content.encode("utf-8")),
         "content_preview": document.page_content[:500],
+        "content": document.page_content,
     }
-    if include_content:
-        record["content"] = document.page_content
     return record
 
 
@@ -249,19 +248,22 @@ This directory is the immutable normalized source layer for wiki-service.
     "article_code": "Điều ...",
     "article_title": "...",
     "legal_note": "...",
-    "doc_type": "Luật/Nghị định/Thông tư/Quyết định",
+    "doc_type": "Luật/Nghị định/Thông tư/Thông tư liên tịch/Quyết định/Pháp lệnh/Nghị quyết/...",
     "effective_date": "dd/mm/yyyy",
     "urls": [],
     "related_text": "...",
     "related_urls": [],
-    "article_index": 1
+    "part": "article | appendix",
+    "article_index": 1,
+    "parent_id": "source-stem:article-index"
   },
   "content_hash": "sha256(normalized article content)",
-  "content_preview": "first 500 characters"
+  "content_preview": "first 500 characters",
+  "content": "full article content"
 }
 ```
 
-By default `articles.jsonl` does not duplicate full content. Read `source_markdown` for the complete text.
+Each attached appendix (PHỤ LỤC) is its own record with `part: appendix`, the article code of the article it was attached to, and its own heading. `content` holds the full text, so the wiki service never re-reads the Markdown.
 """
 
 
@@ -270,17 +272,12 @@ def main(argv: Iterable[str] | None = None) -> None:
     parser.add_argument("--input", default="data_raw", help="Directory containing raw HTML files.")
     parser.add_argument("--output", default="wiki_data/raw_sources", help="Output directory for normalized wiki sources.")
     parser.add_argument("--clean", action="store_true", help="Remove output directory before generating.")
-    parser.add_argument(
-        "--include-jsonl-content",
-        action="store_true",
-        help="Also include full article content in articles.jsonl. Off by default to avoid duplicated storage.",
-    )
     args = parser.parse_args(list(argv) if argv is not None else None)
 
     if args.clean and os.path.exists(args.output):
         shutil.rmtree(args.output)
 
-    result = prepare_wiki_sources(args.input, args.output, include_jsonl_content=args.include_jsonl_content)
+    result = prepare_wiki_sources(args.input, args.output)
     print("Prepared wiki raw sources:")
     for key, value in result.items():
         print(f"- {key}: {value}")

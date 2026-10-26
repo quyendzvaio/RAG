@@ -1,17 +1,40 @@
+"""Parse HTML phap dien thanh Document: moi Dieu mot Document, moi Phu luc dinh kem mot Document rieng.
+
+`page_content` chi la noi dung Dieu (khong gom tieu de, ghi chu, chi dan); cac phan do nam trong metadata.
+"""
+import logging
 import os
 import re
+from pathlib import Path
 from typing import List, Optional, Tuple
 from urllib.parse import unquote
 
-from bs4 import BeautifulSoup, Tag
+from bs4 import BeautifulSoup, NavigableString, Tag
 from langchain_core.documents import Document
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 
+
+logger = logging.getLogger(__name__)
 
 LEGAL_DATE_RE = re.compile(r"có hiệu lực(?: thi hành)?(?: kể từ ngày| từ ngày)?\s+(\d{1,2}/\d{1,2}/\d{4})", re.I)
 ARTICLE_RE = re.compile(r"^(Điều\s+[\w.\-]+)(?:\.\s*)?(.*)$", re.I)
-CHUNK_SIZE = 1200
-CHUNK_OVERLAP = 180
+# Dong tieu de phu luc dung rieng mot dong, vd "PHỤ LỤC", "Phụ lục V", "PHỤ LỤC II.1".
+# Cau dan chieu ("... theo Phụ lục II ban hành kèm theo ...") khong khop.
+APPENDIX_HEADING_RE = re.compile(r"^(PHỤ LỤC|Phụ lục)(\s+(số\s+)?[IVXLC\d]+(\.\d+)*[a-zA-Z]?)?\s*[.:]?$")
+# Ma loai van ban nam trong ma Dieu, vd "Điều 39.4.NĐ.8." -> NĐ.
+DOC_TYPE_CODE_RE = re.compile(r"\.(LQ|NĐ|TT|TL|QĐ|PL|NQ|NL|CT|SL)\.")
+DOC_TYPE_BY_CODE = {
+    "LQ": "Luật",
+    "NĐ": "Nghị định",
+    "TT": "Thông tư",
+    "TL": "Thông tư liên tịch",
+    "QĐ": "Quyết định",
+    "PL": "Pháp lệnh",
+    "NQ": "Nghị quyết",
+    "NL": "Nghị quyết liên tịch",
+    "CT": "Chỉ thị",
+    "SL": "Sắc lệnh",
+}
+APPENDIX_TITLE_CHARS = 160
 
 
 def clean_text(text: str) -> str:
@@ -27,7 +50,20 @@ def extract_text_from_html(html_content: str) -> str:
 
 
 def _tag_text(tag: Tag) -> str:
+    _flatten_tables(tag)
     return clean_text(tag.get_text(separator="\n"))
+
+
+def _flatten_tables(tag: Tag) -> None:
+    """Thay moi <table> bang cac dong "o | o | o" (bang long nhau xu ly tu trong ra ngoai)."""
+    for table in reversed(tag.find_all("table")):
+        rows = []
+        for row in table.find_all("tr"):
+            cells = [" ".join(cell.get_text(" ").split()) for cell in row.find_all(["td", "th"], recursive=False)]
+            cells = [cell for cell in cells if cell]
+            if cells:
+                rows.append(" | ".join(cells))
+        table.replace_with(NavigableString("\n" + "\n".join(rows) + "\n"))
 
 
 def _class_names(tag: Tag) -> List[str]:
@@ -66,17 +102,9 @@ def article_heading(metadata: dict) -> str:
     ).strip()
 
 
-def _infer_doc_type(article_code: str, legal_note: str) -> str:
-    text = f"{article_code} {legal_note}".lower()
-    if ".lq." in text or " luật " in f" {text} ":
-        return "Luật"
-    if ".nđ." in text or "nghị định" in text:
-        return "Nghị định"
-    if ".tt." in text or "thông tư" in text:
-        return "Thông tư"
-    if ".qđ." in text or "quyết định" in text:
-        return "Quyết định"
-    return ""
+def doc_type_from_code(article_code: str) -> str:
+    match = DOC_TYPE_CODE_RE.search(article_code)
+    return DOC_TYPE_BY_CODE[match.group(1)] if match else ""
 
 
 def _extract_effective_date(legal_note: str) -> str:
@@ -84,7 +112,25 @@ def _extract_effective_date(legal_note: str) -> str:
     return match.group(1) if match else ""
 
 
-def _make_article_document(
+def _split_appendices(content: str) -> Tuple[str, List[Tuple[str, str]]]:
+    """Tach noi dung Dieu thanh (than Dieu, [(tieu de phu luc, noi dung phu luc), ...])."""
+    lines = content.split("\n")
+    starts = [index for index, line in enumerate(lines) if APPENDIX_HEADING_RE.match(line)]
+    if not starts:
+        return content, []
+    body = "\n".join(lines[: starts[0]])
+    appendices = []
+    for position, start in enumerate(starts):
+        end = starts[position + 1] if position + 1 < len(starts) else len(lines)
+        section = lines[start:end]
+        # Tieu de = dong "PHỤ LỤC ..." + dong ten dau tien (bo dong "(Kèm theo ...)").
+        name = next((line for line in section[1:4] if not line.startswith("(")), "")
+        title = f"{section[0]} {name}".strip()[:APPENDIX_TITLE_CHARS]
+        appendices.append((title, "\n".join(section)))
+    return body, appendices
+
+
+def _make_article_documents(
     *,
     source_file: str,
     chapter: str,
@@ -95,46 +141,48 @@ def _make_article_document(
     urls: List[str],
     related_text: str,
     related_urls: List[str],
-    article_index: int,
-) -> Optional[Document]:
+    first_index: int,
+) -> List[Document]:
+    """Mot Dieu -> Document cua Dieu + moi Phu luc dinh kem mot Document (cung ma Dieu)."""
     article_code, article_title = _article_parts(article_text)
     content = clean_text(content)
     if not article_code or not content:
-        return None
+        return []
 
-    doc_type = _infer_doc_type(article_code, legal_note)
-    effective_date = _extract_effective_date(legal_note)
-    page_parts = [
-        chapter,
-        chapter_title,
-        article_text,
-        legal_note,
-        content,
-        related_text,
-    ]
-    page_content = clean_text("\n".join(part for part in page_parts if part))
+    body, appendices = _split_appendices(content)
+    base_metadata = {
+        "source": source_file,
+        "source_file": source_file,
+        "chapter": chapter,
+        "chapter_title": chapter_title,
+        "article_code": article_code,
+        "article_title": article_title,
+        "legal_note": legal_note,
+        "doc_type": doc_type_from_code(article_code),
+        "effective_date": _extract_effective_date(legal_note),
+        "urls": urls,
+        "related_text": related_text,
+        "related_urls": related_urls,
+    }
+    parts = [("article", article_title, body)] if body else []
+    parts += [("appendix", f"{article_title} - {title}" if article_title else title, text) for title, text in appendices]
 
-    return Document(
-        page_content=page_content,
-        metadata={
-            "source": source_file,
-            "source_file": source_file,
-            "chapter": chapter,
-            "chapter_title": chapter_title,
-            "article_code": article_code,
-            "article_title": article_title,
-            "legal_note": legal_note,
-            "doc_type": doc_type,
-            "effective_date": effective_date,
-            "urls": urls,
-            "related_text": related_text,
-            "related_urls": related_urls,
+    documents = []
+    for offset, (part, title, text) in enumerate(parts):
+        article_index = first_index + offset
+        metadata = {
+            **base_metadata,
+            "article_title": title,
+            "part": part,
             "article_index": article_index,
-        },
-    )
+            "parent_id": f"{Path(source_file).stem}:{article_index}",
+        }
+        documents.append(Document(page_content=text, metadata=metadata))
+    return documents
 
 
 def parse_legal_html(html_content: str, source_file: str) -> List[Document]:
+    """Moi Dieu (va moi Phu luc) mot Document; file khong co Dieu nao (stub "Đề mục ...") tra ve []."""
     soup = BeautifulSoup(html_content, "html.parser")
     for tag in soup(["script", "style", "header", "footer", "nav"]):
         tag.decompose()
@@ -155,28 +203,26 @@ def parse_legal_html(html_content: str, source_file: str) -> List[Document]:
     current_content: List[str] = []
     current_related: List[str] = []
     current_related_urls: List[str] = []
-    article_index = 0
 
     def flush_article() -> None:
         nonlocal current_article, current_note, current_urls, current_content
-        nonlocal current_related, current_related_urls, article_index
+        nonlocal current_related, current_related_urls
         if not current_article:
             return
-        article_index += 1
-        document = _make_article_document(
-            source_file=source_file,
-            chapter=chapter,
-            chapter_title=chapter_title,
-            article_text=current_article,
-            legal_note=current_note,
-            content="\n".join(current_content),
-            urls=current_urls,
-            related_text="\n".join(current_related),
-            related_urls=current_related_urls,
-            article_index=article_index,
+        documents.extend(
+            _make_article_documents(
+                source_file=source_file,
+                chapter=chapter,
+                chapter_title=chapter_title,
+                article_text=current_article,
+                legal_note=current_note,
+                content="\n".join(current_content),
+                urls=current_urls,
+                related_text="\n".join(current_related),
+                related_urls=current_related_urls,
+                first_index=len(documents) + 1,
+            )
         )
-        if document:
-            documents.append(document)
         current_article = ""
         current_note = ""
         current_urls = []
@@ -219,13 +265,10 @@ def parse_legal_html(html_content: str, source_file: str) -> List[Document]:
 
     flush_article()
 
-    if documents:
-        return documents
-
-    plain_text = extract_text_from_html(html_content)
-    if not plain_text:
-        return []
-    return [Document(page_content=plain_text, metadata={"source": source_file, "source_file": source_file})]
+    if not documents:
+        preview = " ".join(extract_text_from_html(html_content).split())[:80]
+        logger.info("Bo qua %s: khong co Dieu nao (%s)", source_file, preview)
+    return documents
 
 
 def load_html_documents(directory: str) -> List[Document]:
@@ -237,15 +280,3 @@ def load_html_documents(directory: str) -> List[Document]:
         with open(filepath, "r", encoding="utf-8") as file:
             documents.extend(parse_legal_html(file.read(), filename))
     return documents
-
-
-def split_documents(documents: List[Document]) -> List[Document]:
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=CHUNK_SIZE,
-        chunk_overlap=CHUNK_OVERLAP,
-        separators=["\n\n", "\n", ". ", "; ", ", ", " ", ""],
-    )
-    chunks = splitter.split_documents(documents)
-    for index, chunk in enumerate(chunks):
-        chunk.metadata["chunk_id"] = index
-    return chunks

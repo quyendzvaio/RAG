@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import sqlite3
 from dataclasses import dataclass
@@ -9,6 +10,14 @@ from typing import Dict, List, Optional
 from rag.bm25_store import BM25Index, tokenize
 from shared.schemas import ContextItem
 
+
+logger = logging.getLogger(__name__)
+
+# Toan van Dieu dai hon nhieu so voi tieu de: lap tieu de (BM25F don gian) va chuan hoa do dai manh hon
+# de Dieu dai khong thang chi vi chua nhieu tu. Do tren golden set: R@1 0.547 -> 0.640, MRR 0.680 -> 0.750.
+HEADING_REPEAT = 3
+BM25_B = 0.9
+COLUMNS = ("id", "source_markdown", "article_heading", "content_preview", "content", "metadata_json", "searchable_text")
 
 @dataclass
 class _SearchCache:
@@ -41,17 +50,13 @@ class WikiStore:
                     metadata = record.get("metadata", {})
                     searchable = _searchable_record_text(record)
                     conn.execute(
-                        """
-                        INSERT INTO articles (
-                            id, source_markdown, article_heading, content_preview,
-                            metadata_json, searchable_text
-                        ) VALUES (?, ?, ?, ?, ?, ?)
-                        """,
+                        f"INSERT INTO articles ({', '.join(COLUMNS)}) VALUES ({', '.join('?' * len(COLUMNS))})",
                         (
                             record.get("id", ""),
                             record.get("source_markdown", ""),
                             record.get("article_heading", ""),
                             record.get("content_preview", ""),
+                            record.get("content", ""),
                             json.dumps(metadata, ensure_ascii=False),
                             searchable,
                         ),
@@ -80,14 +85,13 @@ class WikiStore:
         for index, score in cache.index.top_k(tokenize(query), top_k):
             row = cache.rows[index]
             metadata = json.loads(row["metadata_json"])
-            content = _read_source_section(self.raw_sources_dir / row["source_markdown"], row["article_heading"])
             citation = metadata.get("legal_note") or metadata.get("source_file") or row["source_markdown"]
             contexts.append(
                 ContextItem(
                     id=row["id"],
                     source=row["source_markdown"],
                     title=row["article_heading"],
-                    content=content or row["content_preview"],
+                    content=row["content"] or row["content_preview"],
                     metadata=metadata,
                     score=score,
                     citation=citation,
@@ -97,6 +101,11 @@ class WikiStore:
 
     def _init_db(self) -> None:
         with self._connect() as conn:
+            existing = [row["name"] for row in conn.execute("PRAGMA table_info(articles)")]
+            if existing and set(existing) != set(COLUMNS):
+                # Schema cu (chua co cot content): du lieu se duoc ingest lai tu articles.jsonl.
+                logger.warning("Bang articles co schema cu %s, tao lai bang. Hay chay ingest.", existing)
+                conn.execute("DROP TABLE articles")
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS articles (
@@ -104,6 +113,7 @@ class WikiStore:
                     source_markdown TEXT NOT NULL,
                     article_heading TEXT,
                     content_preview TEXT,
+                    content TEXT,
                     metadata_json TEXT NOT NULL,
                     searchable_text TEXT NOT NULL
                 )
@@ -118,9 +128,7 @@ class WikiStore:
 
     def _load_article_rows(self):
         with self._connect() as conn:
-            rows = conn.execute(
-                "SELECT id, source_markdown, article_heading, content_preview, metadata_json, searchable_text FROM articles"
-            ).fetchall()
+            rows = conn.execute(f"SELECT {', '.join(COLUMNS)} FROM articles").fetchall()
         return [dict(row) for row in rows]
 
     def _load_search_cache(self) -> _SearchCache:
@@ -130,7 +138,7 @@ class WikiStore:
         with self._cache_lock:
             if self._search_cache is None:
                 rows = self._load_article_rows()
-                index = BM25Index([tokenize(row["searchable_text"]) for row in rows])
+                index = BM25Index([tokenize(row["searchable_text"]) for row in rows], b=BM25_B)
                 self._search_cache = _SearchCache(rows=rows, index=index)
             return self._search_cache
 
@@ -140,27 +148,13 @@ def _searchable_record_text(record: Dict) -> str:
     return "\n".join(
         str(value)
         for value in (
-            record.get("article_heading", ""),
-            record.get("content_preview", ""),
+            " ".join([record.get("article_heading", "")] * HEADING_REPEAT),
+            record.get("content") or record.get("content_preview", ""),
             metadata.get("chapter", ""),
             metadata.get("chapter_title", ""),
             metadata.get("legal_note", ""),
             metadata.get("doc_type", ""),
-            metadata.get("effective_date", ""),
-            metadata.get("related_text", ""),
         )
         if value
     )
 
-
-def _read_source_section(path: Path, heading: str) -> str:
-    if not path.exists() or not heading:
-        return ""
-    text = path.read_text(encoding="utf-8")
-    marker = f"## {heading}"
-    start = text.find(marker)
-    if start < 0:
-        return ""
-    next_start = text.find("\n## ", start + len(marker))
-    section = text[start : next_start if next_start >= 0 else len(text)]
-    return section[:3000]

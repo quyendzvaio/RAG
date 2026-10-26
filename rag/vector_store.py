@@ -1,54 +1,75 @@
+"""Build va load hybrid index parent-child.
+
+- FAISS chua cac child (cum khoan, co tieu de Dieu) de tim kiem ngu nghia.
+- `parents.jsonl` chua parent (Dieu/Phu luc day du + metadata), la thu tra ve cho LLM.
+- BM25 cham diem truc tiep tren parent.
+"""
 import json
 import logging
 import os
+import time
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import List, Tuple
+from typing import Dict, List, Tuple
 
 from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
 
 from rag.bm25_store import BM25Store, load_bm25_store, save_bm25_store
-from rag.data_loader import load_html_documents, split_documents
-from rag.embeddings import embedding_config
+from rag.chunking import CHILD_TARGET_TOKENS, split_parent_child
+from rag.data_loader import load_html_documents
+from rag.embeddings import embedding_config, token_counter
 from shared.config import get_settings
 
 
 logger = logging.getLogger(__name__)
+
+INDEX_VERSION = 2  # 1 = chunk 1200 ky tu khong co parent; 2 = parent-child
+EMBED_LOG_BATCH = 2048  # so child moi lan embed + ghi log tien do
 
 
 @dataclass
 class HybridStore:
     vectorstore: FAISS
     bm25_store: BM25Store
+    parents: Dict[str, Document]
+    children: Dict[str, List[Document]]  # parent_id -> child theo thu tu child_index
     manifest: dict
 
 
 def create_hybrid_vectorstore(embedding_model) -> HybridStore:
     paths = get_settings().paths
     logger.info("Dang doc cac file HTML tu thu muc: %s", paths.data_dir)
-    documents = load_html_documents(paths.data_dir)
-    if not documents:
+    parents = load_html_documents(paths.data_dir)
+    if not parents:
         raise RuntimeError(f"Khong tim thay file HTML hoac tat ca file rong trong {paths.data_dir}.")
 
-    logger.info("Da parse %d don vi phap ly. Dang chia chunk co cau truc...", len(documents))
-    chunks = split_documents(documents)
-    logger.info("Da tao %d chunk de index.", len(chunks))
+    count_tokens, max_tokens = token_counter(embedding_model)
+    logger.info("Da parse %d parent (Dieu/Phu luc). Dang tach child <= %d token...", len(parents), max_tokens)
+    children = split_parent_child(parents, count_tokens, max_tokens)
+    logger.info("Da tao %d child de embed.", len(children))
 
-    logger.info("Dang tao FAISS vector index...")
-    vectorstore = FAISS.from_documents(chunks, embedding_model)
+    vectorstore = _embed_children(children, embedding_model)
     os.makedirs(paths.faiss_dir, exist_ok=True)
     vectorstore.save_local(paths.faiss_dir)
 
-    logger.info("Dang tao BM25 lexical index...")
-    bm25_store = BM25Store(chunks)
+    logger.info("Dang tao BM25 lexical index tren parent...")
+    bm25_store = BM25Store(parents)
     save_bm25_store(bm25_store, paths.bm25_store)
+    _save_parents(parents)
 
-    manifest = _build_manifest(embedding_model, vectorstore, chunks, paths.data_dir)
+    manifest = _build_manifest(embedding_model, vectorstore, parents, children, max_tokens, paths.data_dir)
     _save_manifest(manifest)
 
-    logger.info("Da luu FAISS tai %s, BM25 tai %s, manifest tai %s", paths.faiss_dir, paths.bm25_store, paths.index_manifest)
-    return HybridStore(vectorstore=vectorstore, bm25_store=bm25_store, manifest=manifest)
+    logger.info("Da luu FAISS tai %s, BM25 + parents + manifest tai %s", paths.faiss_dir, paths.hybrid_dir)
+    return HybridStore(
+        vectorstore=vectorstore,
+        bm25_store=bm25_store,
+        parents={parent.metadata["parent_id"]: parent for parent in parents},
+        children=_group_children(children),
+        manifest=manifest,
+    )
 
 
 def index_readiness() -> Tuple[bool, str]:
@@ -59,6 +80,7 @@ def index_readiness() -> Tuple[bool, str]:
         (os.path.join(paths.faiss_dir, "index.faiss"), "thieu faiss_index/index.faiss"),
         (os.path.join(paths.faiss_dir, "index.pkl"), "thieu faiss_index/index.pkl"),
         (paths.bm25_store, "thieu hybrid_index/bm25_store.pkl"),
+        (paths.parents, "thieu hybrid_index/parents.jsonl"),
         (paths.index_manifest, "thieu hybrid_index/index_manifest.json"),
     ]
     for path, reason in checks:
@@ -79,21 +101,72 @@ def load_hybrid_vectorstore(embedding_model) -> HybridStore:
     # Ca hai buoc load deu chay pickle: chi load index do chinh ung dung nay tao ra.
     logger.info("Dang tai FAISS vector index...")
     vectorstore = FAISS.load_local(paths.faiss_dir, embedding_model, allow_dangerous_deserialization=True)
-    logger.info("Dang tai BM25 lexical index...")
+    logger.info("Dang tai parents va BM25 lexical index...")
+    parents = _load_parents()
     bm25_store = load_bm25_store(paths.bm25_store)
-    bm25_store.attach_documents(_documents_from_vectorstore(vectorstore))
-    return HybridStore(vectorstore=vectorstore, bm25_store=bm25_store, manifest=manifest)
+    bm25_store.attach_documents(parents)
+    return HybridStore(
+        vectorstore=vectorstore,
+        bm25_store=bm25_store,
+        parents={parent.metadata["parent_id"]: parent for parent in parents},
+        children=_group_children(_documents_from_vectorstore(vectorstore)),
+        manifest=manifest,
+    )
 
 
-def _build_manifest(embedding_model, vectorstore: FAISS, chunks: List[Document], data_dir: str) -> dict:
+def _embed_children(children: List[Document], embedding_model) -> FAISS:
+    texts = [child.page_content for child in children]
+    vectors: List[List[float]] = []
+    started = time.perf_counter()
+    for start in range(0, len(texts), EMBED_LOG_BATCH):
+        vectors.extend(embedding_model.embed_documents(texts[start : start + EMBED_LOG_BATCH]))
+        elapsed = time.perf_counter() - started
+        logger.info("Da embed %d/%d child (%.0f giay)", len(vectors), len(texts), elapsed)
+    return FAISS.from_embeddings(
+        list(zip(texts, vectors)), embedding_model, metadatas=[child.metadata for child in children]
+    )
+
+
+def _group_children(children: List[Document]) -> Dict[str, List[Document]]:
+    grouped: Dict[str, List[Document]] = defaultdict(list)
+    for child in children:
+        grouped[child.metadata["parent_id"]].append(child)
+    for siblings in grouped.values():
+        siblings.sort(key=lambda child: child.metadata["child_index"])
+    return dict(grouped)
+
+
+def _save_parents(parents: List[Document]) -> None:
+    paths = get_settings().paths
+    os.makedirs(paths.hybrid_dir, exist_ok=True)
+    with open(paths.parents, "w", encoding="utf-8") as file:
+        for parent in parents:
+            record = {"page_content": parent.page_content, "metadata": parent.metadata}
+            file.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+def _load_parents() -> List[Document]:
+    with open(get_settings().paths.parents, "r", encoding="utf-8") as file:
+        return [Document(**json.loads(line)) for line in file if line.strip()]
+
+
+def _build_manifest(
+    embedding_model, vectorstore: FAISS, parents: List[Document], children: List[Document], max_tokens: int, data_dir: str
+) -> dict:
     config = embedding_config(embedding_model)
     config["dimensions"] = str(vectorstore.index.d)
     return {
-        "version": 1,
+        "version": INDEX_VERSION,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "data_dir": data_dir,
-        "chunk_count": len(chunks),
+        "parent_count": len(parents),
+        "child_count": len(children),
         "faiss_ntotal": vectorstore.index.ntotal,
+        "chunking": {
+            "strategy": "parent-child",
+            "child_max_tokens": max_tokens,
+            "child_target_tokens": CHILD_TARGET_TOKENS,
+        },
         "embedding": config,
         "warning": "Only load this index if it was generated locally from trusted data.",
     }
@@ -112,6 +185,11 @@ def _load_manifest() -> dict:
 
 
 def _validate_manifest(manifest: dict, embedding_model) -> None:
+    if manifest.get("version") != INDEX_VERSION:
+        raise ValueError(
+            f"Index version {manifest.get('version')} khong con duoc ho tro (can {INDEX_VERSION}, parent-child). "
+            "Hay chay lai: make docker-build-vector-index"
+        )
     expected = embedding_config(embedding_model)
     actual = manifest.get("embedding", {})
     mismatches = [
@@ -128,7 +206,7 @@ def _validate_manifest(manifest: dict, embedding_model) -> None:
 
 
 def _documents_from_vectorstore(vectorstore: FAISS) -> List[Document]:
-    """Document theo dung thu tu hang FAISS, de gan lai cho BM25."""
+    """Child theo dung thu tu hang FAISS."""
     documents: List[Document] = []
     for index in range(vectorstore.index.ntotal):
         document = vectorstore.docstore.search(vectorstore.index_to_docstore_id[index])
