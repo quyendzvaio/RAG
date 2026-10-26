@@ -5,9 +5,9 @@ Hai service chi khac nhau o ham retrieve va cau chu cua prompt (`PromptStyle`).
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Tuple
 
-from shared.config import get_settings
-from shared.http import service_client, timer_ms
-from shared.schemas import AskRequest, ChatMessage, ChatRequest, ContextItem, ServiceAnswer
+from shared.http import timer_ms
+from shared.llm import complete
+from shared.schemas import AskRequest, ChatMessage, ContextItem, ServiceAnswer
 
 
 # (query, top_k, candidate_k) -> contexts
@@ -15,6 +15,8 @@ Retriever = Callable[[str, int, int], List[ContextItem]]
 
 LLM_CONTEXT_CHARS = 6000  # = PARENT_CONTEXT_CHARS cua vector service: gui nguyen Dieu cho LLM
 EXTRACTIVE_CONTEXT_CHARS = 500
+ANSWER_MAX_TOKENS = 2500  # 1000 cat ngang cac cau tra loi liet ke ho so/dieu kien; bi cat thi shared.llm goi lai gap doi
+TRUNCATED_NOTE = "\n\n_(Câu trả lời bị cắt do vượt giới hạn độ dài.)_"
 
 
 @dataclass(frozen=True)
@@ -100,9 +102,6 @@ def build_prompt(question: str, contexts: List[ContextItem], style: PromptStyle)
 
 
 def _answer_with_llm(question: str, contexts: List[ContextItem], style: PromptStyle) -> Tuple[str, Dict]:
-    chat_request = ChatRequest(messages=build_prompt(question, contexts, style), temperature=0.1, max_tokens=1000)
-    with service_client() as client:
-        response = client.post(f"{get_settings().services.llm}/chat", json=chat_request.model_dump())
-        response.raise_for_status()
-        data = response.json()
-    return data.get("content", ""), data.get("token_usage", {})
+    completion = complete(build_prompt(question, contexts, style), ANSWER_MAX_TOKENS)
+    answer = completion.content + (TRUNCATED_NOTE if completion.truncated else "")
+    return answer, completion.token_usage

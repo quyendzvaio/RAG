@@ -26,16 +26,16 @@ import httpx
 
 from rag.wiki_source_preparer import _frontmatter
 from shared.config import get_settings
+from shared.llm import complete
 from shared.log import setup_logging
-from shared.schemas import ChatMessage, ChatRequest, ChatResponse
+from shared.schemas import ChatMessage
 
 
 logger = logging.getLogger(__name__)
 
 LLM_TIMEOUT = httpx.Timeout(connect=5.0, read=300.0, write=30.0, pool=5.0)
 LLM_WORKERS = 4
-PAGE_MAX_TOKENS = 4000  # het ngan sach thi goi lai mot lan voi gap doi (TRUNCATED_RETRY_FACTOR)
-TRUNCATED_RETRY_FACTOR = 2
+PAGE_MAX_TOKENS = 4000  # het ngan sach thi shared.llm goi lai mot lan voi gap doi
 PLAN_MAX_TOKENS = 3000
 TOPIC_CONTEXT_CHARS = 60000  # Dieu vuot ngan sach nay chi gui tieu de
 ARTICLES_PER_TOPIC = 8  # so chu de ~ so Dieu / hang so nay, gioi han [MIN_TOPICS, MAX_TOPICS]
@@ -203,29 +203,18 @@ class LLMClient:
     calls: int = 0
     model: str = ""  # model thuc su tra loi (llm-service doc DEEPSEEK_MODEL, container nay thi khong)
 
-    def complete(self, prompt: str, max_tokens: int, retry: bool = True) -> str:
-        request = ChatRequest(
-            messages=[ChatMessage(role="system", content=SYSTEM_PROMPT), ChatMessage(role="user", content=prompt)],
-            temperature=0.2,
-            max_tokens=max_tokens,
-        )
-        with httpx.Client(timeout=LLM_TIMEOUT) as client:
-            response = client.post(f"{get_settings().services.llm}/chat", json=request.model_dump())
-            response.raise_for_status()
-        chat = ChatResponse(**response.json())
-        if chat.fallback or not chat.content.strip():
+    def complete(self, prompt: str, max_tokens: int) -> str:
+        messages = [ChatMessage(role="system", content=SYSTEM_PROMPT), ChatMessage(role="user", content=prompt)]
+        completion = complete(messages, max_tokens, temperature=0.2, timeout=LLM_TIMEOUT)
+        if completion.fallback or not completion.content.strip():
             # Khong bao gio ghi text fallback cua llm-service vao wiki.
-            raise RuntimeError(f"LLM khong tra loi duoc: {chat.error}")
+            raise RuntimeError(f"LLM khong tra loi duoc: {completion.error}")
         self.calls += 1
-        self.model = chat.model
-        self.usage.update({key: value for key, value in chat.token_usage.items() if isinstance(value, int)})
-        # llm-service khong tra finish_reason: dung het max_tokens nghia la bi cat giua chung.
-        if chat.token_usage.get("completion_tokens", 0) >= max_tokens:
-            if not retry:
-                raise RuntimeError(f"LLM van bi cat o {max_tokens} token, khong ghi trang do dang")
-            logger.warning("LLM bi cat o %d token, goi lai voi %d", max_tokens, max_tokens * TRUNCATED_RETRY_FACTOR)
-            return self.complete(prompt, max_tokens * TRUNCATED_RETRY_FACTOR, retry=False)
-        return _strip_fences(chat.content)
+        self.model = completion.model
+        self.usage.update(completion.token_usage)
+        if completion.truncated:
+            raise RuntimeError("LLM van bi cat sau khi goi lai voi max_tokens gap doi, khong ghi trang do dang")
+        return _strip_fences(completion.content)
 
 
 def _strip_fences(text: str) -> str:
