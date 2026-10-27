@@ -18,7 +18,7 @@ from shared.schemas import ChatMessage, ContextItem
 logger = logging.getLogger(__name__)
 
 MAX_PAGES = 3  # so trang toi da moi cau hoi (con bi gioi han boi top_k cua request)
-SELECT_MAX_TOKENS = 200
+SELECT_MAX_TOKENS = 3000  # tran, khong phai muc dung: model co suy luan (glm) tieu 300-1300 token truoc khi tra loi
 PAGE_PATH_RE = re.compile(r"(?:de-muc|van-ban|chu-de)/[\w.\-]+")
 DE_MUC_ANSWER_RE = re.compile(r"ĐỀ MỤC:\s*(KHÔNG|\d+\.\d+)", re.I)
 # Danh sach Dieu/lien ket cuoi trang do code sinh: bo khoi context, trich dan da nam trong than trang.

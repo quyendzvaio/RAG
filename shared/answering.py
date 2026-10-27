@@ -16,7 +16,7 @@ Retriever = Callable[[str, int, int], List[ContextItem]]
 LLM_CONTEXT_CHARS = 6000  # = PARENT_CONTEXT_CHARS cua vector service: gui nguyen Dieu cho LLM
 WIKI_CONTEXT_CHARS = 13000  # trang wiki dai nhat ~12300 ky tu (khong tinh danh sach Dieu cuoi trang)
 EXTRACTIVE_CONTEXT_CHARS = 500
-ANSWER_MAX_TOKENS = 2500  # 1000 cat ngang cac cau tra loi liet ke ho so/dieu kien; bi cat thi shared.llm goi lai gap doi
+ANSWER_MAX_TOKENS = 6000  # tran: 1000 cat ngang cau liet ke ho so/dieu kien, model co suy luan (glm) tieu them vai nghin; bi cat thi shared.llm goi lai gap doi
 TRUNCATED_NOTE = "\n\n_(Câu trả lời bị cắt do vượt giới hạn độ dài.)_"
 
 
