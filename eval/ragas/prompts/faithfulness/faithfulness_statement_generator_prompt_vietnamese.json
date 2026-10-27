@@ -1,0 +1,22 @@
+{
+  "ragas_version": "0.4.3",
+  "original_hash": 708904064468833111,
+  "language": "vietnamese",
+  "instruction": "Given a question and an answer, analyze the complexity of each sentence in the answer. Break down each sentence into one or more fully understandable statements. Ensure that no pronouns are used in any statement. Format the outputs in JSON.",
+  "examples": [
+    {
+      "input": {
+        "question": "Albert Einstein là ai và ông nổi tiếng nhất về điều gì?",
+        "answer": "Ông là một nhà vật lý lý thuyết gốc Đức, được công nhận rộng rãi là một trong những nhà vật lý vĩ đại và có ảnh hưởng nhất mọi thời đại. Ông nổi tiếng nhất với việc phát triển thuyết tương đối, ông cũng có những đóng góp quan trọng cho sự phát triển của thuyết cơ học lượng tử."
+      },
+      "output": {
+        "statements": [
+          "Albert Einstein là một nhà vật lý lý thuyết gốc Đức.",
+          "Albert Einstein được công nhận là một trong những nhà vật lý vĩ đại và có ảnh hưởng nhất mọi thời đại.",
+          "Albert Einstein nổi tiếng nhất với việc phát triển thuyết tương đối.",
+          "Albert Einstein cũng có những đóng góp quan trọng cho sự phát triển của thuyết cơ học lượng tử."
+        ]
+      }
+    }
+  ]
+}

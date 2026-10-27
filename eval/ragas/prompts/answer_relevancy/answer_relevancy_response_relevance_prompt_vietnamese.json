@@ -1,0 +1,26 @@
+{
+  "ragas_version": "0.4.3",
+  "original_hash": 365973136680942761,
+  "language": "vietnamese",
+  "instruction": "Generate a question for the given answer and Identify if answer is noncommittal. Give noncommittal as 1 if the answer is noncommittal and 0 if the answer is committal. A noncommittal answer is one that is evasive, vague, or ambiguous. For example, \"I don't know\" or \"I'm not sure\" are noncommittal answers",
+  "examples": [
+    {
+      "input": {
+        "response": "Albert Einstein được sinh ra ở Đức."
+      },
+      "output": {
+        "question": "Albert Einstein được sinh ra ở đâu?",
+        "noncommittal": 0
+      }
+    },
+    {
+      "input": {
+        "response": "Tôi không biết về tính năng đột phá của điện thoại thông minh được phát minh vào năm 2023 vì tôi không biết thông tin sau năm 2022."
+      },
+      "output": {
+        "question": "Tính năng đột phá của điện thoại thông minh được phát minh vào năm 2023 là gì?",
+        "noncommittal": 1
+      }
+    }
+  ]
+}

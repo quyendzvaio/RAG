@@ -1,0 +1,8 @@
+# Chi dung cho make eval-ragas: cai vao volume rieng (/deps), khong vao image dich vu.
+# Ghim cac goi loi theo phien ban trong image de /deps khong che goi khac phien ban len image.
+ragas==0.4.3
+langchain-core==1.7.0
+langchain-community==0.4.2
+numpy==2.2.6
+pydantic==2.12.3
+transformers==4.57.6

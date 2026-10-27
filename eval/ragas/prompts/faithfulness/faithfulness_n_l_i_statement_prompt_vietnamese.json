@@ -1,0 +1,60 @@
+{
+  "ragas_version": "0.4.3",
+  "original_hash": 1822658037343138365,
+  "language": "vietnamese",
+  "instruction": "Your task is to judge the faithfulness of a series of statements based on a given context. For each statement you must return verdict as 1 if the statement can be directly inferred based on the context or 0 if the statement can not be directly inferred based on the context.",
+  "examples": [
+    {
+      "input": {
+        "context": "John là sinh viên tại Đại học XYZ. Anh ấy đang theo đuổi bằng Cử nhân Khoa học Máy tính. Anh ấy đã đăng ký một số khóa học trong học kỳ này, bao gồm Cấu trúc Dữ liệu, Thuật toán và Quản lý Cơ sở dữ liệu. John là một sinh viên siêng năng và dành nhiều thời gian để học tập và hoàn thành bài tập. Anh ấy thường ở lại thư viện muộn để làm việc cho các dự án của mình.",
+        "statements": [
+          "John đang theo học chuyên ngành Sinh học.",
+          "John đang tham gia một khóa học về Trí tuệ Nhân tạo.",
+          "John là một sinh viên tận tụy.",
+          "John có một công việc bán thời gian."
+        ]
+      },
+      "output": {
+        "statements": [
+          {
+            "statement": "John đang theo học chuyên ngành Sinh học.",
+            "reason": "Chuyên ngành của John được đề cập rõ ràng là Khoa học Máy tính. Không có thông tin nào cho thấy anh ấy đang theo học chuyên ngành Sinh học.",
+            "verdict": 0
+          },
+          {
+            "statement": "John đang tham gia một khóa học về Trí tuệ Nhân tạo.",
+            "reason": "Ngữ cảnh đề cập đến các khóa học mà John hiện đang đăng ký, và Trí tuệ Nhân tạo không được đề cập. Do đó, không thể suy ra rằng John đang tham gia một khóa học về AI.",
+            "verdict": 0
+          },
+          {
+            "statement": "John là một sinh viên tận tụy.",
+            "reason": "Ngữ cảnh nêu rằng anh ấy dành nhiều thời gian để học tập và hoàn thành bài tập. Ngoài ra, nó đề cập rằng anh ấy thường ở lại thư viện muộn để làm việc cho các dự án của mình, điều này ngụ ý sự tận tụy.",
+            "verdict": 1
+          },
+          {
+            "statement": "John có một công việc bán thời gian.",
+            "reason": "Không có thông tin nào được đưa ra trong ngữ cảnh về việc John có một công việc bán thời gian.",
+            "verdict": 0
+          }
+        ]
+      }
+    },
+    {
+      "input": {
+        "context": "Quang hợp là một quá trình được sử dụng bởi thực vật, tảo và một số vi khuẩn để chuyển đổi năng lượng ánh sáng thành năng lượng hóa học.",
+        "statements": [
+          "Albert Einstein là một thiên tài."
+        ]
+      },
+      "output": {
+        "statements": [
+          {
+            "statement": "Albert Einstein là một thiên tài.",
+            "reason": "Ngữ cảnh và câu nói không liên quan",
+            "verdict": 0
+          }
+        ]
+      }
+    }
+  ]
+}

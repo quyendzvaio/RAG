@@ -1,0 +1,41 @@
+{
+  "ragas_version": "0.4.3",
+  "original_hash": 1081356510709207617,
+  "language": "vietnamese",
+  "instruction": "Given question, answer and context verify if the context was useful in arriving at the given answer. Give verdict as \"1\" if useful and \"0\" if not with json output.",
+  "examples": [
+    {
+      "input": {
+        "question": "Bạn có thể cho tôi biết gì về Albert Einstein?",
+        "context": "Albert Einstein (14 tháng 3 năm 1879 – 18 tháng 4 năm 1955) là một nhà vật lý lý thuyết gốc Đức, được nhiều người coi là một trong những nhà khoa học vĩ đại và có ảnh hưởng nhất mọi thời đại. Được biết đến nhiều nhất với việc phát triển thuyết tương đối, ông cũng có những đóng góp quan trọng cho cơ học lượng tử, và do đó là một nhân vật trung tâm trong việc định hình lại một cách cách mạng hiểu biết khoa học về tự nhiên mà vật lý hiện đại đã đạt được trong những thập kỷ đầu tiên của thế kỷ XX. Công thức tương đương khối lượng–năng lượng E = mc2 của ông, xuất phát từ thuyết tương đối, đã được gọi là 'phương trình nổi tiếng nhất thế giới'. Ông nhận giải Nobel Vật lý năm 1921 'cho những cống hiến của ông cho vật lý lý thuyết, và đặc biệt cho việc phát hiện ra định luật hiệu ứng quang điện', một bước ngoặt quan trọng trong sự phát triển của thuyết lượng tử. Công trình của ông cũng được biết đến với ảnh hưởng của nó đối với triết học khoa học. Trong một cuộc thăm dò năm 1999 của 130 nhà vật lý hàng đầu trên toàn thế giới do tạp chí Physics World của Anh thực hiện, Einstein được xếp hạng là nhà vật lý vĩ đại nhất mọi thời đại. Những thành tựu trí tuệ và sự độc đáo của ông đã khiến Einstein trở thành đồng nghĩa với thiên tài.",
+        "answer": "Albert Einstein, sinh ngày 14 tháng 3 năm 1879, là một nhà vật lý lý thuyết gốc Đức, được nhiều người coi là một trong những nhà khoa học vĩ đại và có ảnh hưởng nhất mọi thời đại. Ông nhận giải Nobel Vật lý năm 1921 cho những cống hiến của ông cho vật lý lý thuyết."
+      },
+      "output": {
+        "reason": "Ngữ cảnh được cung cấp thực sự hữu ích trong việc đi đến câu trả lời đã cho. Ngữ cảnh bao gồm thông tin quan trọng về cuộc đời và những đóng góp của Albert Einstein, được phản ánh trong câu trả lời.",
+        "verdict": 1
+      }
+    },
+    {
+      "input": {
+        "question": "ai đã thắng cúp thế giới ICC 2020?",
+        "context": "Cúp Thế giới T20 Nam ICC 2022, được tổ chức từ ngày 16 tháng 10 đến ngày 13 tháng 11 năm 2022, tại Úc, là phiên bản thứ tám của giải đấu. Ban đầu được lên kế hoạch cho năm 2020, nó đã bị hoãn lại do đại dịch COVID-19. Anh đã giành chiến thắng, đánh bại Pakistan với năm wicket trong trận chung kết để giành danh hiệu Cúp Thế giới T20 Nam ICC thứ hai của họ.",
+        "answer": "Anh"
+      },
+      "output": {
+        "reason": "ngữ cảnh hữu ích trong việc làm rõ tình hình liên quan đến Cúp Thế giới ICC 2020 và chỉ ra rằng Anh là đội thắng của giải đấu dự định tổ chức vào năm 2020 nhưng thực tế diễn ra vào năm 2022.",
+        "verdict": 1
+      }
+    },
+    {
+      "input": {
+        "question": "Ngọn núi cao nhất thế giới là gì?",
+        "context": "Andes là dãy núi lục địa dài nhất thế giới, nằm ở Nam Mỹ. Nó trải dài qua bảy quốc gia và có nhiều đỉnh cao nhất ở Tây Bán Cầu. Dãy núi này được biết đến với các hệ sinh thái đa dạng, bao gồm Cao nguyên Andes trên cao và rừng mưa Amazon.",
+        "answer": "Đỉnh Everest."
+      },
+      "output": {
+        "reason": "ngữ cảnh được cung cấp thảo luận về dãy núi Andes, mặc dù ấn tượng, nhưng không bao gồm Đỉnh Everest hoặc liên quan trực tiếp đến câu hỏi về ngọn núi cao nhất thế giới.",
+        "verdict": 0
+      }
+    }
+  ]
+}

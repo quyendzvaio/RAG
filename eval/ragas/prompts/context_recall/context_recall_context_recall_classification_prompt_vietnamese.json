@@ -1,0 +1,39 @@
+{
+  "ragas_version": "0.4.3",
+  "original_hash": 1238442016469612421,
+  "language": "vietnamese",
+  "instruction": "Given a context, and an answer, analyze each sentence in the answer and classify if the sentence can be attributed to the given context or not. Use only 'Yes' (1) or 'No' (0) as a binary classification. Output json with reason.",
+  "examples": [
+    {
+      "input": {
+        "question": "Bạn có thể cho tôi biết gì về albert Albert Einstein?",
+        "context": "Albert Einstein (14 tháng 3 năm 1879 - 18 tháng 4 năm 1955) là một nhà vật lý lý thuyết gốc Đức, được nhiều người coi là một trong những nhà khoa học vĩ đại và có ảnh hưởng nhất mọi thời đại. Được biết đến nhiều nhất với việc phát triển thuyết tương đối, ông cũng có những đóng góp quan trọng cho cơ học lượng tử, và do đó là một nhân vật trung tâm trong việc định hình lại mang tính cách mạng hiểu biết khoa học về tự nhiên mà vật lý hiện đại đã đạt được trong những thập kỷ đầu tiên của thế kỷ XX. Công thức tương đương khối lượng-năng lượng E = mc2 của ông, xuất phát từ thuyết tương đối, đã được gọi là 'phương trình nổi tiếng nhất thế giới'. Ông đã nhận Giải Nobel Vật lý năm 1921 'cho những cống hiến của ông cho vật lý lý thuyết, và đặc biệt cho việc phát hiện ra định luật hiệu ứng quang điện', một bước ngoặt quan trọng trong sự phát triển của thuyết lượng tử. Công việc của ông cũng được biết đến với ảnh hưởng của nó đối với triết học khoa học. Trong một cuộc thăm dò năm 1999 của 130 nhà vật lý hàng đầu trên toàn thế giới do tạp chí Physics World của Anh thực hiện, Einstein được xếp hạng là nhà vật lý vĩ đại nhất mọi thời đại. Những thành tựu trí tuệ và tính độc đáo của ông đã khiến Einstein trở thành đồng nghĩa với thiên tài.",
+        "answer": "Albert Einstein, sinh ngày 14 tháng 3 năm 1879, là một nhà vật lý lý thuyết gốc Đức, được nhiều người coi là một trong những nhà khoa học vĩ đại và có ảnh hưởng nhất mọi thời đại. Ông đã nhận Giải Nobel Vật lý năm 1921 cho những cống hiến của ông cho vật lý lý thuyết. Ông đã xuất bản 4 bài báo vào năm 1905. Einstein chuyển đến Thụy Sĩ vào năm 1895."
+      },
+      "output": {
+        "classifications": [
+          {
+            "statement": "Albert Einstein, sinh ngày 14 tháng 3 năm 1879, là một nhà vật lý lý thuyết gốc Đức, được nhiều người coi là một trong những nhà khoa học vĩ đại và có ảnh hưởng nhất mọi thời đại.",
+            "reason": "Ngày sinh của Einstein được đề cập rõ ràng trong ngữ cảnh.",
+            "attributed": 1
+          },
+          {
+            "statement": "Ông đã nhận Giải Nobel Vật lý năm 1921 cho những cống hiến của ông cho vật lý lý thuyết.",
+            "reason": "Câu chính xác có trong ngữ cảnh được đưa ra.",
+            "attributed": 1
+          },
+          {
+            "statement": "Ông đã xuất bản 4 bài báo vào năm 1905.",
+            "reason": "Không có đề cập về các bài báo ông đã viết trong ngữ cảnh được đưa ra.",
+            "attributed": 0
+          },
+          {
+            "statement": "Einstein chuyển đến Thụy Sĩ vào năm 1895.",
+            "reason": "Không có bằng chứng hỗ trợ cho điều này trong ngữ cảnh được đưa ra.",
+            "attributed": 0
+          }
+        ]
+      }
+    }
+  ]
+}

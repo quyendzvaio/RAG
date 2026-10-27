@@ -1,7 +1,7 @@
 COMPOSE ?= docker compose
 EVAL_TAG ?= latest
 
-.PHONY: prepare-wiki-sources docker-build docker-up docker-down docker-logs docker-vector-logs docker-wiki-logs docker-build-vector-index build-wiki-layer docker-rebuild-all-data docker-clean-volumes eval-golden eval-retrieval analyze-ingestion
+.PHONY: prepare-wiki-sources docker-build docker-up docker-down docker-logs docker-vector-logs docker-wiki-logs docker-build-vector-index build-wiki-layer docker-rebuild-all-data docker-clean-volumes eval-golden eval-retrieval eval-ragas-deps eval-ragas analyze-ingestion
 
 # Chay trong container (host khong can langchain); ghi ra ./wiki_data/raw_sources.
 prepare-wiki-sources:
@@ -46,6 +46,16 @@ eval-golden:
 # Can stack dang chay (make docker-up). Vd: make eval-retrieval EVAL_TAG=refactor ARGS="--compare baseline"
 eval-retrieval:
 	python3 scripts/eval_retrieval.py --tag $(EVAL_TAG) $(ARGS)
+
+# RAGAS: ragas cai vao volume rag_eval_deps (mot lan), khong vao image dich vu. Can stack dang chay.
+eval-ragas-deps:
+	$(COMPOSE) run --rm --no-deps -u root --entrypoint "" -v rag_eval_deps:/deps -v ./requirements-eval.txt:/tmp/req.txt:ro vector-rag-service \
+		sh -c 'pip install -q --root-user-action=ignore --target /deps -r /tmp/req.txt && chown -R 1000:1000 /deps'
+
+# vd: make eval-ragas EVAL_TAG=ragas-v1 ARGS="--limit 5"
+eval-ragas:
+	$(COMPOSE) run --rm --no-deps -e PYTHONPATH=/deps:/app -v rag_eval_deps:/deps:ro -v ./scripts:/app/scripts:ro \
+		-v ./eval:/app/eval -v ./wiki_data:/app/wiki_data:ro vector-rag-service python scripts/eval_ragas.py --tag $(EVAL_TAG) $(ARGS)
 
 # Bao cao chat luong parse/chunk/embedding input/wiki lookup (can wiki_data/raw_sources va model_cache).
 analyze-ingestion:
