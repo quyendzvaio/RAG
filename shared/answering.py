@@ -94,10 +94,14 @@ def extractive_answer(contexts: List[ContextItem], style: PromptStyle) -> str:
     return "\n\n".join(lines)
 
 
+def format_context(context: ContextItem, chars: int) -> str:
+    """Mot context dung nhu LLM tra loi thay: tieu de, Citation (so hieu, ngay), noi dung cat o `chars`."""
+    return f"{context.title}\nCitation: {context.citation}\n{context.content[:chars]}"
+
+
 def build_prompt(question: str, contexts: List[ContextItem], style: PromptStyle) -> List[ChatMessage]:
     context_text = "\n\n".join(
-        f"[{index}] {context.title}\nCitation: {context.citation}\n{context.content[:style.context_chars]}"
-        for index, context in enumerate(contexts, 1)
+        f"[{index}] {format_context(context, style.context_chars)}" for index, context in enumerate(contexts, 1)
     )
     prompt = f"{style.instructions}\n\nCâu hỏi: {question}\n\n{style.context_label}:\n{context_text}"
     return [

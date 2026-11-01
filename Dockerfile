@@ -3,15 +3,20 @@ FROM python:3.10-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
+    UV_LINK_MODE=copy \
+    UV_COMPILE_BYTECODE=1 \
+    UV_PROJECT_ENVIRONMENT=/opt/venv \
+    UV_PYTHON_DOWNLOADS=never \
+    VIRTUAL_ENV=/opt/venv \
+    PATH=/opt/venv/bin:$PATH \
     HF_HOME=/cache/huggingface \
     TRANSFORMERS_CACHE=/cache/huggingface/transformers \
     SENTENCE_TRANSFORMERS_HOME=/cache/sentence-transformers \
+    EMBEDDING_ONNX_DIR=/cache/onnx \
     AUTO_BUILD_INDEX=false
 
+# false: bo extra "embeddings" (torch, sentence-transformers, onnxruntime); service dung HashingEmbeddings.
 ARG INSTALL_EMBEDDINGS=true
-ARG TORCH_VERSION=2.3.1+cpu
-ARG SENTENCE_TRANSFORMERS_VERSION=3.0.1
 
 WORKDIR /app
 
@@ -19,15 +24,14 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl gosu libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt /app/requirements.txt
+# Phien ban goi nam trong uv.lock (sua pyproject.toml roi chay `uv lock` tren host); --frozen: lock lech thi loi.
+COPY --from=ghcr.io/astral-sh/uv:0.13.4 /uv /usr/local/bin/uv
+COPY pyproject.toml uv.lock /app/
 
-RUN python -m pip install --upgrade pip setuptools wheel \
-    && python -m pip install -r /app/requirements.txt \
-    && if [ "${INSTALL_EMBEDDINGS}" = "true" ]; then \
-        python -m pip install --index-url https://download.pytorch.org/whl/cpu "torch==${TORCH_VERSION}" \
-        && python -m pip install "sentence-transformers==${SENTENCE_TRANSFORMERS_VERSION}"; \
-    fi \
-    && python -m pip check
+RUN --mount=type=cache,target=/root/.cache/uv \
+    if [ "${INSTALL_EMBEDDINGS}" = "true" ]; then extras="--extra embeddings"; else extras=""; fi \
+    && uv sync --frozen --no-dev $extras \
+    && uv pip check
 
 COPY rag /app/rag
 COPY shared /app/shared

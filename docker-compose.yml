@@ -4,8 +4,6 @@ services:
       context: .
       args:
         INSTALL_EMBEDDINGS: "true"
-        TORCH_VERSION: "2.3.1+cpu"
-        SENTENCE_TRANSFORMERS_VERSION: "3.0.1"
     image: rag-ttcsn:cpu
     command: ["uvicorn", "services.api_gateway.app:app", "--host", "0.0.0.0", "--port", "7860"]
     ports:
@@ -31,14 +29,13 @@ services:
       context: .
       args:
         INSTALL_EMBEDDINGS: "true"
-        TORCH_VERSION: "2.3.1+cpu"
-        SENTENCE_TRANSFORMERS_VERSION: "3.0.1"
     command: ["uvicorn", "services.vector_rag_service.app:app", "--host", "0.0.0.0", "--port", "8001"]
     environment:
       EMBEDDING_BACKEND: ${EMBEDDING_BACKEND:-sentence-transformers}
       EMBEDDING_PROFILE: ${EMBEDDING_PROFILE:-vietnamese}
       EMBEDDING_DEVICE: ${EMBEDDING_DEVICE:-auto}
       EMBEDDING_BATCH_SIZE: ${EMBEDDING_BATCH_SIZE:-8}
+      EMBEDDING_RUNTIME: ${EMBEDDING_RUNTIME:-onnx}
       RERANKER_DEVICE: ${RERANKER_DEVICE:-auto}
       RERANKER_BATCH_SIZE: ${RERANKER_BATCH_SIZE:-4}
       PRELOAD_VECTOR_INDEX: ${PRELOAD_VECTOR_INDEX:-true}
@@ -62,8 +59,6 @@ services:
       context: .
       args:
         INSTALL_EMBEDDINGS: "true"
-        TORCH_VERSION: "2.3.1+cpu"
-        SENTENCE_TRANSFORMERS_VERSION: "3.0.1"
     command: ["uvicorn", "services.wiki_rag_service.app:app", "--host", "0.0.0.0", "--port", "8002"]
     environment:
       WIKI_DIR: /app/wiki_data/wiki
@@ -85,8 +80,6 @@ services:
       context: .
       args:
         INSTALL_EMBEDDINGS: "true"
-        TORCH_VERSION: "2.3.1+cpu"
-        SENTENCE_TRANSFORMERS_VERSION: "3.0.1"
     command: ["uvicorn", "services.llm_service.app:app", "--host", "0.0.0.0", "--port", "8003"]
     extra_hosts:
       - "host.docker.internal:host-gateway"  # proxy LLM chay tren host (DEEPSEEK_BASE_URL=http://host.docker.internal:...)
@@ -106,8 +99,6 @@ services:
       context: .
       args:
         INSTALL_EMBEDDINGS: "true"
-        TORCH_VERSION: "2.3.1+cpu"
-        SENTENCE_TRANSFORMERS_VERSION: "3.0.1"
     command: ["uvicorn", "services.evaluator_service.app:app", "--host", "0.0.0.0", "--port", "8004"]
     environment:
       EVAL_DB_PATH: /app/eval_data/eval.db

@@ -48,9 +48,9 @@ from ragas.metrics import Faithfulness, LLMContextPrecisionWithReference, LLMCon
 
 from rag.embeddings import get_embedding_model
 from rag.wiki_builder import read_pages
-from shared.answering import LLM_CONTEXT_CHARS, WIKI_CONTEXT_CHARS
+from shared.answering import LLM_CONTEXT_CHARS, WIKI_CONTEXT_CHARS, format_context
 from shared.llm import complete
-from shared.schemas import ChatMessage
+from shared.schemas import ChatMessage, ContextItem
 
 EVAL_DIR = Path("eval")
 RESULTS_DIR = EVAL_DIR / "results"
@@ -285,7 +285,7 @@ def score(tag: str, service: str, questions: list, references: dict, answers: di
     rows, pending = [], []
     for row in questions:
         answer = answers[(service, row["question"])]
-        contexts = [context["content"][: CONTEXT_CHARS[service]] for context in answer.get("contexts", [])]
+        contexts = [format_context(ContextItem(**context), CONTEXT_CHARS[service]) for context in answer.get("contexts", [])]
         answered = bool(contexts) and not answer.get("error")
         rows.append({"set": row["set"], "question": row["question"], "answered": answered, "covered": row["covered"],
                      "error": answer.get("error"), "tokens": answer.get("token_usage", {}).get("total_tokens")})

@@ -1,0 +1,47 @@
+[project]
+name = "legal-rag-compare"
+version = "0.1.0"
+description = "RAG phap luat Viet Nam: so sanh vector RAG va wiki RAG"
+requires-python = "==3.10.*"
+dependencies = [
+    "beautifulsoup4>=4.12.0",
+    "faiss-cpu>=1.8.0",
+    "fastapi>=0.115.0",
+    # gradio 6 can huggingface-hub>=1.16, xung dot voi sentence-transformers==3.0.1.
+    "gradio>=4.44.0,<6",
+    "httpx>=0.27.0",
+    "langchain-community>=0.4.2",
+    "langchain-core>=0.2.0",
+    "langchain-text-splitters>=0.2.0",
+    "python-dotenv>=1.0.0",
+    "uvicorn>=0.30.0",
+]
+
+[project.optional-dependencies]
+# Embedding that (khong co thi dung HashingEmbeddings, chi de smoke test). torch lay tu index CPU cua PyTorch,
+# khong thi keo ca bo CUDA vai GB.
+embeddings = [
+    "torch==2.3.1",
+    "sentence-transformers==3.0.1",
+    "onnxruntime==1.20.1",
+    "onnx==1.17.0",
+]
+
+[dependency-groups]
+# Chi cho make eval-ragas: cai vao volume rag_eval_deps, khong vao image dich vu. Cung lock nen cung phien ban
+# voi cac goi trong image.
+eval = [
+    "ragas==0.4.3",
+]
+
+[tool.uv]
+package = false
+environments = ["sys_platform == 'linux'"]
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true

@@ -1,0 +1,69 @@
+{
+ "suspect": [
+  "Kinh phí cho công tác điều ước quốc tế được lấy từ những nguồn nào?",
+  "Trẻ sinh ra ở Việt Nam có cha mẹ đều không quốc tịch nhưng thường trú tại Việt Nam thì có quốc tịch Việt Nam không?",
+  "Những loại diện tích đất nào được dùng để tính thuế sử dụng đất phi nông nghiệp?",
+  "Cơ sở chế biến cá da trơn và tôm quy mô từ 300 tấn sản phẩm/năm trở lên thuộc đối tượng áp dụng của quy định nào?",
+  "Giấy thông hành bị thu hồi hoặc hủy giá trị sử dụng trong những trường hợp nào?",
+  "Tiêu chí phân loại và điều kiện thành lập, sáp nhập, giải thể đơn vị sự nghiệp công lập ngành nông nghiệp được quy định ở đâu?",
+  "Nghị định về quản lý, sử dụng pháo có hiệu lực từ ngày nào và thay thế nghị định nào trước đó?",
+  "Cơ quan nào công bố vùng đón trả hoa tiêu, khu neo đậu cho tàu thuyền vào cảng biển khu vực Trà Vinh, Sóc Trăng?",
+  "Người được giao quản lý tài sản trưng dụng có trách nhiệm gì trong việc sử dụng và bảo quản tài sản?",
+  "Tổ chức thu phí sở hữu công nghiệp phải nộp tiền phí đã thu vào tài khoản ngân sách chậm nhất khi nào?",
+  "Quyết định về Ủy ban Quốc gia phòng, chống AIDS và tệ nạn ma túy, mại dâm có hiệu lực khi nào?",
+  "Người yêu cầu thả tàu bay bị bắt giữ có quyền khiếu nại quyết định trả lại đơn trong thời hạn nào?",
+  "Văn bản hợp nhất phải trình bày tên, lời nói đầu và phần ký xác thực theo mẫu nào?",
+  "Quỹ nào được trích phí bảo lãnh và phí quản lý cho vay lại để chi cho nghiệp vụ quản lý nợ công?",
+  "Ủy ban nhân dân các cấp có trách nhiệm gì trong việc bố trí kinh phí và quỹ đất phát triển thể thao trường học?",
+  "Thông tư hướng dẫn thực hành tiết kiệm, chống lãng phí của Bộ Tài chính có hiệu lực từ ngày nào?",
+  "Những ai phải tuân theo quy định pháp luật về hoạt động hàng không dân dụng tại Việt Nam?",
+  "Kinh phí ngân sách nhà nước cho công tác điều ước quốc tế và thỏa thuận quốc tế được quản lý, sử dụng theo quy định nào?",
+  "Đất ở trong hạn mức của hộ nghèo có được miễn thuế sử dụng đất phi nông nghiệp không?",
+  "Quy định chuẩn quốc gia về ngôn ngữ ký hiệu cho người khuyết tật được ban hành kèm theo văn bản nào?",
+  "Tổ chức được cấp Giấy chứng nhận hoạt động khoa học công nghệ phải gửi báo cáo định kỳ cho cơ quan nào và bao lâu một lần?",
+  "Mức nhuận bút trưng bày, triển lãm tác phẩm mỹ thuật, nhiếp ảnh quy mô quốc tế là bao nhiêu?",
+  "Những nội dung nào được hướng dẫn khi tính và thực hiện thuế tài nguyên?",
+  "Người đã nghỉ hưu giữ chức danh lãnh đạo chuyên trách tại các hội được hưởng chế độ thù lao nào?",
+  "Công tác dân tộc phải thực hiện theo những nguyên tắc cơ bản nào?",
+  "Việc khai báo, điều tra, thống kê và báo cáo tai nạn lao động trong Bộ Quốc phòng được quy định ở đâu?",
+  "Tác phẩm nào được coi là công bố, phổ biến ra nước ngoài?",
+  "Chương trình đào tạo cho hoạt động chứng nhận cần có những nội dung gì?",
+  "Cơ sở xét nghiệm HIV đã được cấp giấy chứng nhận đủ điều kiện trước ngày 1/7/2016 có được tiếp tục hoạt động không?"
+ ],
+ "summary": {
+  "deepseek": {
+   "n": 150,
+   "answered": 150,
+   "faithfulness": 0.688,
+   "faithfulness_scored": 150,
+   "answer_relevancy": 0.9084,
+   "answer_relevancy_scored": 150,
+   "llm_context_precision_with_reference": 0.831,
+   "llm_context_precision_with_reference_scored": 150,
+   "context_recall": 0.819,
+   "context_recall_scored": 150,
+   "context_recall_all": 0.819,
+   "answer_tokens_mean": 4811
+  },
+  "ket_hop": {
+   "n": 150,
+   "answered": 150,
+   "faithfulness": 0.7945,
+   "faithfulness_scored": 150,
+   "answer_relevancy": 0.9066,
+   "answer_relevancy_scored": 150,
+   "llm_context_precision_with_reference": 0.8404,
+   "llm_context_precision_with_reference_scored": 150,
+   "context_recall": 0.9023,
+   "context_recall_scored": 150,
+   "context_recall_all": 0.9023,
+   "answer_tokens_mean": 4811
+  }
+ },
+ "judge_usage": {
+  "prompt_tokens": 1356034,
+  "completion_tokens": 82599,
+  "total_tokens": 1438633,
+  "calls": 319
+ }
+}

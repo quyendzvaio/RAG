@@ -30,6 +30,8 @@ class EmbeddingSettings:
     device: str
     batch_size: int
     hashing_dim: int
+    runtime: str  # "onnx" (ONNX Runtime tren CPU) hoac "torch"; khong vao manifest vi vector nhu nhau
+    onnx_dir: str
 
 
 @dataclass(frozen=True)
@@ -117,6 +119,8 @@ def get_settings() -> Settings:
             device=_env("EMBEDDING_DEVICE", "auto").lower(),
             batch_size=int(_env("EMBEDDING_BATCH_SIZE", "8")),
             hashing_dim=int(_env("HASHING_EMBEDDING_DIM", "384")),
+            runtime=_env("EMBEDDING_RUNTIME", "onnx").lower(),
+            onnx_dir=_env("EMBEDDING_ONNX_DIR", ".cache/onnx"),
         ),
         reranker=RerankerSettings(
             model=_env("RERANKER_MODEL", ""),

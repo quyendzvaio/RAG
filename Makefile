@@ -49,8 +49,9 @@ eval-retrieval:
 
 # RAGAS: ragas cai vao volume rag_eval_deps (mot lan), khong vao image dich vu. Can stack dang chay.
 eval-ragas-deps:
-	$(COMPOSE) run --rm --no-deps -u root --entrypoint "" -v rag_eval_deps:/deps -v ./requirements-eval.txt:/tmp/req.txt:ro vector-rag-service \
-		sh -c 'pip install -q --root-user-action=ignore --target /deps -r /tmp/req.txt && chown -R 1000:1000 /deps'
+	$(COMPOSE) run --rm --no-deps -u root --entrypoint "" -v rag_eval_deps:/deps vector-rag-service \
+		sh -c 'uv export --frozen --only-group eval --no-hashes --no-emit-project -o /tmp/eval.txt \
+		&& uv pip install --target /deps -r /tmp/eval.txt && chown -R 1000:1000 /deps'
 
 # vd: make eval-ragas EVAL_TAG=ragas-v1 ARGS="--limit 5"
 eval-ragas:

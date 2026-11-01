@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 HASHING_MAX_TOKENS = 256  # HashingEmbeddings khong co gioi han; dung cung cua so voi model that
 CHARS_PER_TOKEN = 3  # uoc luong khi khong co tokenizer
+EMBEDDING_RUNTIMES = ("onnx", "torch")  # onnx: OnnxEmbeddings khi chay CPU; torch: luon HuggingFaceEmbeddings
 
 
 class HashingEmbeddings(Embeddings):
@@ -40,11 +41,11 @@ class HashingEmbeddings(Embeddings):
 
 def get_embedding_model(config: Optional[EmbeddingSettings] = None):
     config = config or get_settings().embedding
+    if config.runtime not in EMBEDDING_RUNTIMES:
+        raise ValueError(f"EMBEDDING_RUNTIME khong ho tro: {config.runtime} (chon {', '.join(EMBEDDING_RUNTIMES)})")
 
     if config.backend in {"sentence-transformers", "huggingface", "hf"}:
         try:
-            from langchain_community.embeddings import HuggingFaceEmbeddings
-
             choice = choose_torch_device(config.device, "EMBEDDING_DEVICE", get_settings().force_cuda)
             logger.info("Embedding device: %s (%s)", choice.device, choice.reason)
             if choice.gpu_name:
@@ -54,6 +55,17 @@ def get_embedding_model(config: Optional[EmbeddingSettings] = None):
                     choice.compute_capability,
                     choice.total_memory_mb,
                 )
+            # ONNX Runtime chi chay CPU o day; co GPU (vd. build index tren Kaggle) thi torch nhanh hon.
+            if config.runtime == "onnx" and choice.device == "cpu":
+                try:
+                    from rag.onnx_embeddings import OnnxEmbeddings
+
+                    return OnnxEmbeddings(config.model, config.onnx_dir, config.batch_size)
+                except Exception as exc:
+                    logger.warning("Khong dung duoc ONNX Runtime, dung PyTorch: %s", exc)
+
+            from langchain_community.embeddings import HuggingFaceEmbeddings
+
             return HuggingFaceEmbeddings(
                 model_name=config.model,
                 model_kwargs={"device": choice.device},
@@ -94,7 +106,8 @@ def embedding_config(embedding_model) -> Dict[str, str]:
 
 def token_counter(embedding_model) -> Tuple[Callable[[str], int], int]:
     """(ham dem token khong tinh special token, max_seq_length) cua embedding model."""
-    client = getattr(embedding_model, "client", None)
+    # HuggingFaceEmbeddings giu tokenizer trong .client (SentenceTransformer); OnnxEmbeddings giu truc tiep.
+    client = getattr(embedding_model, "client", embedding_model)
     tokenizer = getattr(client, "tokenizer", None)
     max_tokens = getattr(client, "max_seq_length", None)
     if tokenizer is None or not max_tokens:
