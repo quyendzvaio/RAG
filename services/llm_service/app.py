@@ -1,3 +1,4 @@
+import json
 from typing import Dict
 
 import httpx
@@ -34,6 +35,8 @@ def chat(request: ChatRequest) -> ChatResponse:
             )
 
         payload = {
+            "stream": False,  # mot so provider qua 9router (vd. mmg/) mac dinh tra SSE khi thieu truong nay
+            **settings.extra_body,
             "model": model,
             "messages": [message.model_dump() for message in request.messages],
             "temperature": request.temperature,
@@ -47,14 +50,14 @@ def chat(request: ChatRequest) -> ChatResponse:
             with httpx.Client(timeout=DEFAULT_TIMEOUT) as client:
                 response = client.post(settings.chat_completions_url, json=payload, headers=headers)
                 response.raise_for_status()
-                data = response.json()
+                data = _parse_completion(response.text)
         except Exception as exc:
             return ChatResponse(
                 model=model,
                 content=_fallback_response(request),
                 latency_ms=elapsed(),
                 fallback=True,
-                error=str(exc),
+                error=_error_text(exc),
             )
 
     choice = data.get("choices", [{}])[0]
@@ -62,10 +65,23 @@ def chat(request: ChatRequest) -> ChatResponse:
     usage: Dict = data.get("usage", {})
     return ChatResponse(
         model=data.get("model", model),
-        content=message.get("content", ""),
+        content=message.get("content") or "",
         token_usage=usage,
         latency_ms=elapsed(),
     )
+
+
+def _parse_completion(text: str) -> Dict:
+    """JSON OpenAI; mot so gateway (vd. cl/ qua 9router) boc trong {"data": {...}} va them dong "data: [DONE]"."""
+    data, _end = json.JSONDecoder().raw_decode(text.lstrip())
+    return data["data"] if "choices" not in data and isinstance(data.get("data"), dict) else data
+
+
+def _error_text(exc: Exception) -> str:
+    """Kem body loi cua provider (vd. 429 FreeUsageLimitError, 402 het so du) de client phan biet loi tam thoi."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        return f"{exc}\n{exc.response.text[:500]}"
+    return str(exc)
 
 
 def _fallback_response(request: ChatRequest) -> str:

@@ -4,7 +4,8 @@ Chay trong image, ragas nam o volume rieng (make eval-ragas-deps, make eval-raga
 (qua llm-service), embedding la model embedding cua project. Bo cau hoi:
 - golden: eval/golden.jsonl (cau co dau), reference = cau tra loi mau LLM viet chi tu Dieu dap an.
 - synthesis: eval/synthesis.jsonl (cau can nhieu Dieu), reference = cau tra loi mau tu toan bo Dieu cua de muc.
-Reference va cau tra loi cua service duoc cache trong eval/ nen chay lai chi cham diem lai.
+Reference, cau tra loi cua service va diem (luu sau moi lo SCORE_BATCH mau, theo giam khao) duoc cache trong eval/,
+nen chay lai sau khi bi ngat chi lam phan con thieu.
 
     python scripts/eval_ragas.py --tag ragas-v1 --limit 5
 """
@@ -58,9 +59,19 @@ PROMPTS_DIR = EVAL_DIR / "ragas" / "prompts"
 CONTEXT_CHARS = {"vector": LLM_CONTEXT_CHARS, "wiki": WIKI_CONTEXT_CHARS}  # dung bang phan LLM tra loi da thay
 METRIC_NAMES = ("faithfulness", "answer_relevancy", "llm_context_precision_with_reference", "context_recall")
 JUDGE_MAX_TOKENS = 4000
+# Khung prompt cua ragas bang tieng Anh: model nho (qwen3-14b) viet cau hoi/menh de bang tieng Anh du cau lenh
+# da dan tieng Viet, va answer relevancy so cau hoi do voi cau hoi goc bang embedding chi hieu tieng Viet
+# (cosine ~0.2 thay vi ~0.6). System message nay ep moi noi dung sinh ra la tieng Viet.
+JUDGE_SYSTEM = ("Mọi nội dung bạn viết (câu hỏi, mệnh đề, lý do, giải thích) phải bằng tiếng Việt, cùng ngôn ngữ với "
+                "dữ liệu đầu vào, kể cả khi hướng dẫn viết bằng tiếng Anh. Giữ nguyên tên khóa JSON theo schema.")
 REFERENCE_MAX_TOKENS = 2500
 ROLES = {"human": "user", "ai": "assistant", "system": "system"}
 RETRY_DELAYS = (5, 15, 30, 60, 120, 240)  # giay; proxy LLM tra 429 khi qua nhieu request
+# Loi het tien/het quota (kiraai: 402 "Insufficient VND wallet balance"; opencode free: 429 "Free usage limit
+# reached", retry-after ~14 h): thu lai vo ich, dung ca lan do.
+QUOTA_ERROR_MARKERS = ("402 payment required", "insufficient", "quota", "balance", "usage limit")
+MAX_FAILED_ANSWERS = 5  # so cau tra loi loi lien tiep (da het luot thu) thi dung: provider hong, khong phai cau kho
+SCORE_BATCH = 12  # so mau moi lan evaluate; diem luu sau moi lo
 LLM_FALLBACK_PREFIX = "LLM fallback:"  # llm-service tra text nay (fallback=True) khi DeepSeek loi
 # Model giam khao (va viet reference), --judge-model; None = model llm-service dang dung de tra loi.
 # Giu co dinh khi so sanh model tra loi, de diem doi la do cau tra loi chu khong do nguoi cham.
@@ -71,14 +82,30 @@ class Retryable(Exception):
     pass
 
 
+class Fatal(Exception):
+    """Loi khong thu lai duoc (het tien/quota): dung ca lan do, giu phan da cache."""
+
+
+_fatal: list = []  # loi Fatal dau tien; ragas nuot exception trong job nen sau moi lo phai kiem tra
+
+
+def check_fatal() -> None:
+    if _fatal:
+        raise Fatal(_fatal[0])
+
+
 def with_retry(call, what: str):
     for delay in (0,) + RETRY_DELAYS:
+        check_fatal()
         if delay:
             time.sleep(delay)
         try:
             return call()
         except (Retryable, httpx.HTTPError) as exc:
             last = exc
+            if any(marker in str(exc).lower() for marker in QUOTA_ERROR_MARKERS):
+                _fatal.append(f"{what}: {str(exc)[:300]}")
+                raise Fatal(_fatal[0]) from exc
             print(f"Thu lai sau loi ({what}): {str(exc)[:120]}", file=sys.stderr)
     raise RuntimeError(f"Het so lan thu ({what}): {last}")
 
@@ -104,7 +131,8 @@ class LLMServiceChat(BaseChatModel):
         return "llm-service"
 
     def _generate(self, messages, stop=None, run_manager=None, **kwargs) -> ChatResult:
-        chat = [ChatMessage(role=ROLES.get(message.type, "user"), content=str(message.content)) for message in messages]
+        chat = [ChatMessage(role="system", content=JUDGE_SYSTEM)]
+        chat += [ChatMessage(role=ROLES.get(message.type, "user"), content=str(message.content)) for message in messages]
         completion = complete_retry(chat, self.max_tokens, temperature=self.temperature)
         record_usage(completion.token_usage)
         return ChatResult(generations=[ChatGeneration(message=AIMessage(content=completion.content))])
@@ -208,11 +236,22 @@ def ensure_answers(tag: str, questions: list, services: list, gateway: str, work
                 raise Retryable(data.get("error") or data["answer"][:120])
             return {**data, "service": service, "question": question}  # ServiceAnswer cung co hai khoa nay
 
-        return with_retry(call, f"{service}: {question[:40]}")
+        try:
+            return with_retry(call, f"{service}: {question[:40]}")
+        except RuntimeError as exc:
+            # Loi lap lai (vd. model suy luan lau hon timeout 60 s cua proxy): ghi la khong tra loi duoc
+            # (answered=False khi cham) thay vi dung ca lan do. Xoa dong nay trong cache de thu lai.
+            return {"service": service, "question": question, "answer": "", "contexts": [], "error": str(exc)[:500]}
 
+    failed = 0
     with ThreadPoolExecutor(workers) as pool:
         for start in range(0, len(jobs), workers * 4):
             batch = list(pool.map(ask, jobs[start : start + workers * 4]))
+            good = [row for row in batch if not row.get("error")]
+            failed = 0 if len(good) == len(batch) else failed + len(batch) - len(good)
+            if failed >= MAX_FAILED_ANSWERS and not good:
+                append_jsonl(path, good)
+                raise Fatal(f"{failed} cau tra loi loi lien tiep, dung: {batch[-1]['error'][:300]}")
             append_jsonl(path, batch)
             cached.update({(row["service"], row["question"]): row for row in batch})
             print(f"Da lay {min(start + workers * 4, len(jobs))}/{len(jobs)} cau tra loi", file=sys.stderr)
@@ -237,25 +276,38 @@ def build_metrics(llm, embeddings) -> list:
     return metrics
 
 
-def score(service: str, questions: list, references: dict, answers: dict, metrics: list, llm, embeddings, workers: int):
-    rows, samples = [], []
+def score(tag: str, service: str, questions: list, references: dict, answers: dict, metrics: list, llm, embeddings,
+          workers: int) -> list:
+    """Diem tung cau; cham theo lo SCORE_BATCH va luu vao <tag>-scores.jsonl sau moi lo (theo giam khao)."""
+    path = RESULTS_DIR / f"{tag}-scores.jsonl"
+    judge = judge_model or "llm-service"
+    done = {row["question"]: row for row in read_jsonl(path) if row["service"] == service and row["judge"] == judge}
+    rows, pending = [], []
     for row in questions:
         answer = answers[(service, row["question"])]
         contexts = [context["content"][: CONTEXT_CHARS[service]] for context in answer.get("contexts", [])]
         answered = bool(contexts) and not answer.get("error")
         rows.append({"set": row["set"], "question": row["question"], "answered": answered, "covered": row["covered"],
                      "error": answer.get("error"), "tokens": answer.get("token_usage", {}).get("total_tokens")})
-        if answered:
-            samples.append(SingleTurnSample(user_input=row["question"], response=answer["answer"],
-                                            retrieved_contexts=contexts, reference=references[row["question"]]))
-    if samples:
-        result = evaluate(EvaluationDataset(samples=samples), metrics=metrics, llm=llm, embeddings=embeddings,
-                          run_config=RunConfig(max_workers=workers, timeout=900, max_retries=3), show_progress=False)
-        scored = iter(result.to_pandas().to_dict("records"))
-        for row in rows:
-            if row["answered"]:
-                record = next(scored)
-                row.update({name: _float(record.get(name)) for name in METRIC_NAMES})
+        if answered and row["question"] in done:
+            rows[-1].update({name: done[row["question"]].get(name) for name in METRIC_NAMES})
+        elif answered:
+            sample = SingleTurnSample(user_input=row["question"], response=answer["answer"],
+                                      retrieved_contexts=contexts, reference=references[row["question"]])
+            pending.append((rows[-1], sample))
+    if done:
+        print(f"{service}: {len(rows) - len(pending)} cau da co diem, cham {len(pending)} cau", file=sys.stderr)
+    for start in range(0, len(pending), SCORE_BATCH):
+        batch = pending[start : start + SCORE_BATCH]
+        result = evaluate(EvaluationDataset(samples=[sample for _, sample in batch]), metrics=metrics, llm=llm,
+                          embeddings=embeddings, run_config=RunConfig(max_workers=workers, timeout=900, max_retries=3),
+                          show_progress=False)
+        check_fatal()  # lo bi het tien giua chung: diem thieu, khong luu
+        for (row, _), record in zip(batch, result.to_pandas().to_dict("records")):
+            row.update({name: _float(record.get(name)) for name in METRIC_NAMES})
+        append_jsonl(path, [{"service": service, "question": row["question"], "judge": judge,
+                             **{name: row[name] for name in METRIC_NAMES}} for row, _ in batch])
+        print(f"{service}: da cham {min(start + SCORE_BATCH, len(pending))}/{len(pending)} cau", file=sys.stderr)
     return rows
 
 
@@ -291,6 +343,7 @@ def main() -> None:
     parser.add_argument("--gateway", default="http://api-gateway:7860")
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--judge-model", default=None, help="Model giam khao (mac dinh: model cua llm-service)")
+    parser.add_argument("--answers-only", action="store_true", help="Chi lay va cache cau tra loi, khong cham")
     args = parser.parse_args()
     global judge_model
     judge_model = args.judge_model
@@ -302,6 +355,8 @@ def main() -> None:
         row["covered"] = row["source_file"] in covered
     references = ensure_references(questions, args.workers)
     answers = ensure_answers(args.tag, questions, services, args.gateway, args.workers)
+    if args.answers_only:
+        return
     print(f"Token reference + tra loi: {dict(_usage)}", file=sys.stderr)
     _usage.clear()
 
@@ -311,7 +366,7 @@ def main() -> None:
 
     report = {"tag": args.tag, "set": args.set, "limit": args.limit, "judge_model": judge_model, "summary": {}, "rows": {}}
     for service in services:
-        rows = score(service, questions, references, answers, metrics, llm, embeddings, args.workers)
+        rows = score(args.tag, service, questions, references, answers, metrics, llm, embeddings, args.workers)
         report["rows"][service] = rows
         for subset in sorted({row["set"] for row in rows}):
             report["summary"][f"{service}/{subset}"] = summarize([row for row in rows if row["set"] == subset])
@@ -330,4 +385,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Fatal as exc:
+        sys.exit(f"Dung danh gia (da luu phan cache): {exc}")

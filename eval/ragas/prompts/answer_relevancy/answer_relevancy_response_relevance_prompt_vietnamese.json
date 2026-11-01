@@ -2,7 +2,7 @@
   "ragas_version": "0.4.3",
   "original_hash": 365973136680942761,
   "language": "vietnamese",
-  "instruction": "Generate a question for the given answer and Identify if answer is noncommittal. Give noncommittal as 1 if the answer is noncommittal and 0 if the answer is committal. A noncommittal answer is one that is evasive, vague, or ambiguous. For example, \"I don't know\" or \"I'm not sure\" are noncommittal answers",
+  "instruction": "Generate a question for the given answer and Identify if answer is noncommittal. Give noncommittal as 1 if the answer is noncommittal and 0 if the answer is committal. A noncommittal answer is one that is evasive, vague, or ambiguous. For example, \"I don't know\" or \"I'm not sure\" are noncommittal answers. The question MUST be written in Vietnamese, the same language as the answer (Câu hỏi phải viết bằng tiếng Việt, cùng ngôn ngữ với câu trả lời).",
   "examples": [
     {
       "input": {

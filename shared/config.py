@@ -4,9 +4,11 @@ Doc bien moi truong (va .env neu co) mot lan qua `get_settings()`. Default khop
 docker-compose.yml. Duong dan tuong doi tinh tu thu muc dang chay: repo root khi chay
 tren host, /app trong container.
 """
+import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
+from typing import Any, Dict
 
 from dotenv import load_dotenv
 
@@ -42,6 +44,9 @@ class DeepSeekSettings:
     api_key: str
     base_url: str
     model: str
+    # Truong JSON them vao moi request chat (DEEPSEEK_EXTRA_BODY), vd. {"thinking": {"type": "disabled"}}
+    # de tat suy luan; moi provider nhan tham so khac nhau.
+    extra_body: Dict[str, Any] = field(default_factory=dict)
 
     @property
     def configured(self) -> bool:
@@ -122,6 +127,7 @@ def get_settings() -> Settings:
             api_key=_env("DEEPSEEK_API_KEY", ""),
             base_url=_env("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
             model=_env("DEEPSEEK_MODEL", "deepseek-chat"),
+            extra_body=json.loads(_env("DEEPSEEK_EXTRA_BODY", "") or "{}"),
         ),
         services=ServiceUrls(
             vector=_env("VECTOR_SERVICE_URL", "http://vector-rag-service:8001"),
