@@ -4,6 +4,7 @@ FAISS tim child -> gom ve parent (diem cua child tot nhat); BM25 cham truc tiep 
 reciprocal rank fusion -> rerank tren doan context se gui cho LLM.
 """
 import logging
+import re
 from dataclasses import dataclass, field
 from functools import lru_cache
 from itertools import chain
@@ -35,6 +36,45 @@ RERANK_METADATA_KEYS = (
     "doc_type",
     "effective_date",
 )
+# Viet tat thuong gap trong van ban: cau hoi viet tat hay viet day du deu them dang con lai (cho BM25 va rerank,
+# khong cho FAISS). Vd. Dieu "Số và thời hạn sử dụng của CMND" voi cau hoi "chứng minh nhân dân ...".
+ABBREVIATIONS = {
+    "CMND": "chứng minh nhân dân",
+    "CCCD": "căn cước công dân",
+    "UBND": "ủy ban nhân dân",
+    "HĐND": "hội đồng nhân dân",
+    "BHXH": "bảo hiểm xã hội",
+    "BHYT": "bảo hiểm y tế",
+    "BHTN": "bảo hiểm thất nghiệp",
+    "TNDN": "thu nhập doanh nghiệp",
+    "TNCN": "thu nhập cá nhân",
+    "GTGT": "giá trị gia tăng",
+    "QNCN": "quân nhân chuyên nghiệp",
+    "HKDD": "hàng không dân dụng",
+    "NNT": "người nộp thuế",
+    "NHNN": "ngân hàng nhà nước",
+    "NSNN": "ngân sách nhà nước",
+    "CNTT": "công nghệ thông tin",
+    "PCCC": "phòng cháy chữa cháy",
+    "TTHC": "thủ tục hành chính",
+    "GDNN": "giáo dục nghề nghiệp",
+    "ĐVSNCL": "đơn vị sự nghiệp công lập",
+}
+# Cau hoi hoi ve "ai phai tuan theo", "pham vi", "trach nhiem thi hanh", "hieu luc" -> Dieu mo dau/cuoi van ban
+# (tieu de chung chung, noi dung khong nhac lai chu de nen thua cac Dieu cu the). Cong INTENT_BOOST vao diem cuoi
+# (thang [0, 1]) cho Dieu co tieu de dung loai. Golden: Recall@5 0.913 -> 0.953 (cung voi ABBREVIATIONS), khong cau nao mat.
+INTENT_BOOST = 0.35
+ARTICLE_INTENTS = (
+    (r"\b(những ai|ai phải|đối tượng nào|áp dụng (đối với|cho) (ai|những ai|đối tượng nào))", r"đối tượng áp dụng"),
+    (
+        r"(phạm vi điều chỉnh|những nội dung nào được (hướng dẫn|quy định)|bao gồm những nội dung"
+        r"|quy định (về )?những (nội dung|vấn đề) (gì|nào))",
+        r"phạm vi (điều chỉnh|áp dụng)",
+    ),
+    (r"(trách nhiệm thi hành|chịu trách nhiệm (tổ chức )?thi hành)", r"(trách nhiệm thi hành|tổ chức thực hiện)"),
+    (r"có hiệu lực (thi hành )?(từ|kể từ)? ?(ngày nào|khi nào)", r"hiệu lực"),
+)
+_INTENT_PATTERNS = [(re.compile(question, re.I), re.compile(title, re.I)) for question, title in ARTICLE_INTENTS]
 
 
 @dataclass
@@ -91,7 +131,25 @@ def hybrid_search(question: str, store: HybridStore, top_k: int = 5, candidate_k
         candidate.matched_children = matched.get(key, [])
 
     fused = sorted(candidates.values(), key=lambda item: item.score, reverse=True)
-    return rerank(question, store, fused[:candidate_k])[:top_k]
+    return boost_article_intent(question, rerank(question, store, fused[:candidate_k]))[:top_k]
+
+
+def expand_abbreviations(question: str) -> str:
+    """Them dang day du cua viet tat co trong cau hoi va viet tat cua cum day du co trong cau hoi."""
+    lowered = question.lower().replace("uỷ", "ủy")
+    extra = [full for short, full in ABBREVIATIONS.items() if re.search(rf"\b{short}\b", question)]
+    extra += [short for short, full in ABBREVIATIONS.items() if full in lowered]
+    return f"{question} {' '.join(extra)}" if extra else question
+
+
+def boost_article_intent(question: str, ranked: List[RankedDocument]) -> List[RankedDocument]:
+    titles = [title for pattern, title in _INTENT_PATTERNS if pattern.search(question)]
+    if not titles:
+        return ranked
+    for candidate in ranked:
+        if any(title.search(candidate.document.metadata.get("article_title", "")) for title in titles):
+            candidate.score += INTENT_BOOST
+    return sorted(ranked, key=lambda item: item.score, reverse=True)
 
 
 def candidate_hits(
@@ -107,7 +165,7 @@ def candidate_hits(
             matched[parent_id] = []
             vector_hits.append((store.parents[parent_id], distance))
         matched[parent_id].append(child.metadata["child_index"])
-    bm25_hits = store.bm25_store.search_with_scores(question, top_k=candidate_k)
+    bm25_hits = store.bm25_store.search_with_scores(expand_abbreviations(question), top_k=candidate_k)
     return vector_hits[:candidate_k], bm25_hits, matched
 
 
@@ -115,6 +173,7 @@ def rerank(question: str, store: HybridStore, candidates: List[RankedDocument]) 
     if not candidates:
         return []
 
+    question = expand_abbreviations(question)
     for candidate in candidates:
         candidate.context = context_text(question, store, candidate)
     texts = [_rerank_text(candidate.document.metadata, candidate.context) for candidate in candidates]

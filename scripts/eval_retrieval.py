@@ -42,11 +42,13 @@ def context_key(context: dict) -> list:
     return [metadata.get("source_file", ""), metadata.get("article_code", ""), context.get("id", "")]
 
 
-def first_hit_rank(contexts: list, row: dict):
+def first_hit_rank(contexts: list, row: dict, equivalents: tuple = ()):
+    """`equivalents`: [(source_file, article_code)] cung duoc tinh la trung (eval/golden_equivalents.jsonl)."""
+    targets = [(row["source_file"], row["article_code"]), *equivalents]
     for rank, context in enumerate(contexts, start=1):
         metadata = context.get("metadata", {})
         codes = metadata.get("article_codes") or [metadata.get("article_code")]
-        if metadata.get("source_file") == row["source_file"] and row["article_code"] in codes:
+        if any(metadata.get("source_file") == source_file and code in codes for source_file, code in targets):
             return rank
     return None
 
@@ -73,12 +75,22 @@ def run(args) -> dict:
     if args.limit:
         rows = rows[: args.limit]
 
+    equivalents = {}
+    if args.equivalents:
+        for line in Path(args.equivalents).read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                entry = json.loads(line)
+                equivalents[entry["question"]] = [tuple(key) for key in entry["equivalents"]]
+
     result = {"tag": args.tag, "top_k": args.top_k, "candidate_k": args.candidate_k, "metrics": {}, "snapshot": {}}
     for service, path in SERVICES.items():
+        if service not in args.services.split(","):
+            continue
         for variant, field in VARIANTS.items():
             def evaluate(row):
                 contexts, latency = ask(args.gateway, path, row[field], args.top_k, args.candidate_k)
-                return first_hit_rank(contexts, row), latency, [context_key(c) for c in contexts]
+                lenient = first_hit_rank(contexts, row, equivalents.get(row["question"], ())) if equivalents else None
+                return first_hit_rank(contexts, row), latency, [context_key(c) for c in contexts], lenient
 
             # Chay tuan tu de latency khong bi nhieu do tranh CPU.
             with ThreadPoolExecutor(max_workers=args.workers) as executor:
@@ -86,6 +98,9 @@ def run(args) -> dict:
             ranks = [o[0] for o in outputs]
             latencies = [o[1] for o in outputs]
             result["metrics"][f"{service}/{variant}"] = summarize(ranks, latencies)
+            if equivalents:
+                # Cung cau hoi, Dieu tuong duong cung tinh la trung (snapshot khong doi).
+                result["metrics"][f"{service}/{variant}+tuong-duong"] = summarize([o[3] for o in outputs], latencies)
             result["snapshot"][f"{service}/{variant}"] = [o[2] for o in outputs]
             print(f"{service}/{variant}: {result['metrics'][f'{service}/{variant}']}", flush=True)
     return result
@@ -120,6 +135,8 @@ def main() -> None:
     parser.add_argument("--candidate-k", type=int, default=20)
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--limit", type=int, default=0)
+    parser.add_argument("--equivalents", help="vd. eval/golden_equivalents.jsonl: bao them metric chap nhan Dieu tuong duong")
+    parser.add_argument("--services", default="vector,wiki", help="vd. vector: bo wiki (wiki goi LLM chon trang, ton token)")
     args = parser.parse_args()
 
     result = run(args)

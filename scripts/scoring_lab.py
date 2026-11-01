@@ -24,8 +24,10 @@ from rag.query_engine import (  # noqa: E402
     RankedDocument,
     _lexical_rerank_score,
     _rerank_text,
+    boost_article_intent,
     candidate_hits,
     context_text,
+    expand_abbreviations,
     hybrid_search,
 )
 from rag.vector_store import load_hybrid_vectorstore  # noqa: E402
@@ -51,7 +53,10 @@ def fuse(vector_hits, bm25_hits, vector_weight: float, bm25_weight: float) -> li
     return [(key, documents[key], scores[key]) for key in order]
 
 
-def score_variant(fused, rerank_scores: dict, rerank_weight: float, normalize_fused: bool, candidate_k: int) -> list:
+def score_variant(
+    fused, rerank_scores: dict, rerank_weight: float, normalize_fused: bool, candidate_k: int, intent_question: str = ""
+) -> list:
+    """`intent_question`: cong INTENT_BOOST nhu hybrid_search (bien the "current")."""
     pool = fused[:candidate_k]
     if not pool:
         return []
@@ -63,9 +68,11 @@ def score_variant(fused, rerank_scores: dict, rerank_weight: float, normalize_fu
     for (key, document, fused_score), rerank_score in zip(pool, raw):
         fused_part = (fused_score - f_min) / f_range if normalize_fused else fused_score
         normalized = (rerank_score - r_min) / r_range
-        final.append((rerank_weight * normalized + (1 - rerank_weight) * fused_part, document))
-    final.sort(key=lambda item: item[0], reverse=True)
-    return [document for _score, document in final]
+        final.append(RankedDocument(document=document, score=rerank_weight * normalized + (1 - rerank_weight) * fused_part))
+    final.sort(key=lambda item: item.score, reverse=True)
+    if intent_question:
+        final = boost_article_intent(intent_question, final)
+    return [item.document for item in final]
 
 
 def collapse_articles(documents: list) -> list:
@@ -96,7 +103,7 @@ def summarize(ranks: list) -> dict:
 
 
 def build_variants() -> dict:
-    variants = {"current": dict(rerank_weight=RERANK_WEIGHT, normalize_fused=True, collapse=False)}
+    variants = {"current": dict(rerank_weight=RERANK_WEIGHT, normalize_fused=True, collapse=False, intent=True)}
     for weight in RERANK_WEIGHTS:
         for collapse in (False, True):
             name = f"minmax w={weight}" + (" +collapse" if collapse else "")
@@ -129,20 +136,24 @@ def main() -> None:
             vector_hits, bm25_hits, matched = candidate_hits(question, store, args.candidate_k)
             fused = fuse(vector_hits, bm25_hits, VECTOR_WEIGHT, BM25_WEIGHT)
             rerank_scores = {}
+            rerank_query = expand_abbreviations(question)  # nhu rag.query_engine.rerank
             for key, doc, _score in fused[: args.candidate_k]:
                 ranked = RankedDocument(document=doc, score=0.0, matched_children=matched.get(key, []))
-                text = _rerank_text(doc.metadata, context_text(question, store, ranked))
-                rerank_scores[key] = _lexical_rerank_score(question, text, doc.metadata)
+                text = _rerank_text(doc.metadata, context_text(rerank_query, store, ranked))
+                rerank_scores[key] = _lexical_rerank_score(rerank_query, text, doc.metadata)
 
             for name, spec in variants.items():
-                ordered = score_variant(fused, rerank_scores, spec["rerank_weight"], spec["normalize_fused"], args.candidate_k)
+                ordered = score_variant(
+                    fused, rerank_scores, spec["rerank_weight"], spec["normalize_fused"], args.candidate_k,
+                    question if spec.get("intent") else "",
+                )
                 if spec["collapse"]:
                     ordered = collapse_articles(ordered)
                 ranks[(name, variant)].append(first_hit_rank(ordered, row, args.top_k))
 
             if index < args.check:
                 expected = [document_key(item.document) for item in hybrid_search(question, store, args.top_k, args.candidate_k)]
-                ours = score_variant(fused, rerank_scores, RERANK_WEIGHT, True, args.candidate_k)[: args.top_k]
+                ours = score_variant(fused, rerank_scores, RERANK_WEIGHT, True, args.candidate_k, question)[: args.top_k]
                 if [document_key(doc) for doc in ours] != expected:
                     mismatches += 1
         print(f"{index + 1}/{len(rows)}", end="\r", file=sys.stderr, flush=True)
