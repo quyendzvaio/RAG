@@ -22,10 +22,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
-import httpx
-
 from rag.wiki_source_preparer import _frontmatter
 from shared.config import get_settings
+from shared.http import LLM_TIMEOUT
 from shared.llm import complete
 from shared.log import setup_logging
 from shared.schemas import ChatMessage
@@ -33,7 +32,6 @@ from shared.schemas import ChatMessage
 
 logger = logging.getLogger(__name__)
 
-LLM_TIMEOUT = httpx.Timeout(connect=5.0, read=300.0, write=30.0, pool=5.0)
 LLM_WORKERS = 4
 PAGE_MAX_TOKENS = 4000  # het ngan sach thi shared.llm goi lai mot lan voi gap doi
 PLAN_MAX_TOKENS = 3000

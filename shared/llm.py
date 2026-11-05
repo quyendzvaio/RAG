@@ -7,7 +7,7 @@ from typing import Dict, List, Optional
 import httpx
 
 from shared.config import get_settings
-from shared.http import DEFAULT_TIMEOUT, service_client
+from shared.http import LLM_TIMEOUT, service_client
 from shared.schemas import ChatMessage, ChatRequest, ChatResponse
 
 
@@ -30,7 +30,7 @@ def complete(
     messages: List[ChatMessage],
     max_tokens: int,
     temperature: float = 0.1,
-    timeout: httpx.Timeout = DEFAULT_TIMEOUT,
+    timeout: httpx.Timeout = LLM_TIMEOUT,
     retry_truncated: bool = True,
     model: Optional[str] = None,
 ) -> Completion:

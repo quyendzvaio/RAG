@@ -6,7 +6,7 @@ from fastapi.responses import RedirectResponse
 from gradio.routes import mount_gradio_app
 
 from shared.config import get_settings
-from shared.http import service_client
+from shared.http import ANSWER_TIMEOUT, service_client
 from shared.log import setup_logging
 from shared.schemas import AskRequest, CompareResponse, EvaluationRecord, HealthResponse, ServiceAnswer
 from shared.tracing import ContextThreadPoolExecutor, traceable, uuid7
@@ -84,7 +84,7 @@ def _ask_wiki_service(request: AskRequest) -> ServiceAnswer:
 
 def _call_answer(service: str, url: str, request: AskRequest) -> ServiceAnswer:
     try:
-        with service_client() as client:
+        with service_client(ANSWER_TIMEOUT) as client:
             response = client.post(url, json=request.model_dump())
             response.raise_for_status()
             return ServiceAnswer.model_validate(response.json())

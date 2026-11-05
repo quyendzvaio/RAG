@@ -1,4 +1,6 @@
 import json
+import logging
+import time
 from typing import Dict
 
 import httpx
@@ -12,6 +14,7 @@ from shared.tracing import add_tracing, get_current_run_tree, traceable, tracing
 
 
 setup_logging()
+logger = logging.getLogger(__name__)
 app = FastAPI(title="llm-service", version="0.1.0")
 add_tracing(app)
 
@@ -49,7 +52,7 @@ def chat(request: ChatRequest) -> ChatResponse:
         traced = get_current_run_tree() is not None
         try:
             with tracing_context(enabled=None if traced else False):
-                data = _chat_completion(payload, langsmith_extra={"metadata": {"ls_model_name": model}})
+                data = _chat_with_retry(payload, model)
         except Exception as exc:
             return ChatResponse(
                 model=model,
@@ -68,6 +71,23 @@ def chat(request: ChatRequest) -> ChatResponse:
         token_usage=usage,
         latency_ms=elapsed(),
     )
+
+
+# Loi tam thoi cua gateway phia provider (vd. kiraai cat request o giay thu 60 bang 504): goi lai mot lan.
+# 4xx (402 het tien, 429 gioi han) khong goi lai: lap lai cung khong qua duoc.
+RETRY_STATUSES = {502, 503, 504}
+RETRY_DELAY_SECONDS = 2.0
+
+
+def _chat_with_retry(payload: Dict, model: str) -> Dict:
+    try:
+        return _chat_completion(payload, langsmith_extra={"metadata": {"ls_model_name": model}})
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code not in RETRY_STATUSES:
+            raise
+        logger.warning("Provider tra %d, goi lai sau %.0f s", exc.response.status_code, RETRY_DELAY_SECONDS)
+    time.sleep(RETRY_DELAY_SECONDS)
+    return _chat_completion(payload, langsmith_extra={"metadata": {"ls_model_name": model, "retry": 1}})
 
 
 @traceable(

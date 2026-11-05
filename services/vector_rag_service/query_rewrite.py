@@ -16,7 +16,9 @@ from shared.tracing import traceable
 
 logger = logging.getLogger(__name__)
 
-REWRITE_MAX_TOKENS = 200
+# Tran, khong phai muc dung: model co suy luan khong tat duoc (qwen3.5-flash-sale qua kiraai) nghi ~700-1000 token
+# truoc khi in cau; 200 token tra ve noi dung rong va bo qua buoc them dau.
+REWRITE_MAX_TOKENS = 1500
 MAX_WORD_CHANGE = 0.3  # so tu lech qua ty le nay (LLM tra loi hoac dien dat lai) thi bo ban viet lai
 REWRITE_SYSTEM = (
     "Bạn chuẩn hóa câu hỏi pháp luật tiếng Việt trước khi tra cứu văn bản.\n"
