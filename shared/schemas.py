@@ -75,6 +75,7 @@ class EvaluationRecord(BaseModel):
     wiki_answer: ServiceAnswer
     metrics: List[MetricScore] = Field(default_factory=list)
     preferred: Optional[str] = None
+    request_id: Optional[str] = None  # = id trace LangSmith cua lan /ask/compare (neu bat tracing)
 
 
 class CompareResponse(BaseModel):
@@ -83,3 +84,4 @@ class CompareResponse(BaseModel):
     wiki: ServiceAnswer
     metrics: List[MetricScore] = Field(default_factory=list)
     run_id: Optional[int] = None
+    request_id: Optional[str] = None

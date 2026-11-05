@@ -212,6 +212,34 @@ Dữ liệu và index không nằm trong image mà được mount hoặc lưu tr
 | `model_cache` | Model embedding và bản ONNX |
 | `rag_eval_deps` | Thư viện RAGAS (không cài vào image service) |
 
+## Tracing (LangSmith)
+
+Tracing tắt mặc định. Bật bằng cách điền vào `.env` rồi khởi động lại stack:
+
+```env
+LANGSMITH_TRACING=true
+LANGSMITH_API_KEY=...          # tạo tại smith.langchain.com, không commit
+LANGSMITH_PROJECT=legal-rag
+```
+
+Mỗi lần gọi `/ask/compare` là một trace, đi xuyên các service:
+
+```text
+ask_compare (gateway; metadata: request_id, git_commit, llm_model, top_k, use_llm)
+├─ answer_question (vector; prompt_version)
+│  ├─ rewrite_query → chat_completions (llm)
+│  ├─ hybrid_search (retriever: top-k Điều kèm điểm; embedding_model, index_created_at)
+│  └─ chat_completions (llm: prompt, câu trả lời, token)
+└─ answer_question (wiki; prompt_version)
+   ├─ select_wiki_pages (retriever) → chat_completions (llm)
+   └─ chat_completions (llm)
+```
+
+- `request_id` trả về trong `CompareResponse`, hiện trên giao diện và được lưu trong `eval_runs`, đồng thời là id của trace, nên từ một dòng log tìm được đúng trace.
+- `prompt_version` là mã băm nội dung prompt: sửa prompt thì mã đổi, lọc trên LangSmith để so trước và sau.
+- Câu hỏi, context và câu trả lời được gửi lên LangSmith (cloud). Không muốn gửi nội dung thì đặt `LANGSMITH_HIDE_INPUTS=true` và `LANGSMITH_HIDE_OUTPUTS=true`; trace vẫn có cấu trúc, thời gian, token và metadata.
+- Khi chạy đánh giá nhiều câu, hạ `LANGSMITH_TRACING_SAMPLING_RATE` để không tốn quota. Wiki builder và giám khảo RAGAS gọi thẳng llm-service nên không tạo trace.
+
 ## Phát triển
 
 Dependency được quản lý bằng [uv](https://docs.astral.sh/uv/): `pyproject.toml` khai báo, `uv.lock` ghim phiên bản, image cài bằng `uv sync --frozen`.

@@ -4,12 +4,19 @@ from typing import Callable, Iterator
 
 import httpx
 
+from shared.tracing import trace_headers
+
 
 DEFAULT_TIMEOUT = httpx.Timeout(connect=5.0, read=120.0, write=30.0, pool=5.0)
 
 
-def service_client() -> httpx.Client:
-    return httpx.Client(timeout=DEFAULT_TIMEOUT)
+def service_client(timeout: httpx.Timeout = DEFAULT_TIMEOUT) -> httpx.Client:
+    """Client goi service khac; gan header trace LangSmith de service nhan noi tiep cung mot trace."""
+    return httpx.Client(timeout=timeout, event_hooks={"request": [_add_trace_headers]})
+
+
+def _add_trace_headers(request: httpx.Request) -> None:
+    request.headers.update(trace_headers())
 
 
 @contextmanager

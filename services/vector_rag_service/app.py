@@ -1,7 +1,8 @@
 import logging
+from collections import Counter
 from contextlib import asynccontextmanager
 from functools import lru_cache
-from typing import List
+from typing import Dict, List, Tuple
 
 from fastapi import FastAPI, HTTPException
 
@@ -12,8 +13,10 @@ from services.vector_rag_service.query_rewrite import rewrite_query
 from shared.answering import VECTOR_PROMPT, answer_question
 from shared.config import get_settings
 from shared.http import timer_ms
+from shared.llm import add_usage
 from shared.log import setup_logging
 from shared.schemas import AskRequest, ContextItem, HealthResponse, SearchRequest, ServiceAnswer
+from shared.tracing import add_tracing, annotate, as_documents, traceable
 
 
 SERVICE_NAME = "vector-rag-service"
@@ -30,6 +33,7 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title=SERVICE_NAME, version="0.1.0", lifespan=lifespan)
+add_tracing(app)
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -62,14 +66,23 @@ def index_status():
 @app.post("/search", response_model=List[ContextItem])
 def search(request: SearchRequest) -> List[ContextItem]:
     try:
-        return _retrieve(request.query, request.top_k, request.candidate_k)
+        return _retrieve(request.query, request.top_k, request.candidate_k)[0]
     except Exception as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @app.post("/answer", response_model=ServiceAnswer)
 def answer(request: AskRequest) -> ServiceAnswer:
-    return answer_question(SERVICE_NAME, request, _retrieve, VECTOR_PROMPT)
+    rewrite_usage: Counter = Counter()
+
+    def retrieve(query: str, top_k: int, candidate_k: int) -> List[ContextItem]:
+        contexts, usage = _retrieve(query, top_k, candidate_k)
+        rewrite_usage.update(usage)
+        return contexts
+
+    result = answer_question(SERVICE_NAME, request, retrieve, VECTOR_PROMPT)
+    result.token_usage = add_usage(result.token_usage, rewrite_usage)
+    return result
 
 
 @lru_cache(maxsize=1)
@@ -93,8 +106,19 @@ def _preload() -> None:
         logger.warning("Khong preload duoc vector index: %s", exc)
 
 
-def _retrieve(query: str, top_k: int, candidate_k: int) -> List[ContextItem]:
-    ranked = hybrid_search(rewrite_query(query), _store(), top_k=top_k, candidate_k=candidate_k)
+def _retrieve(query: str, top_k: int, candidate_k: int) -> Tuple[List[ContextItem], Dict[str, int]]:
+    """(contexts, token LLM dung de viet lai cau hoi)."""
+    search_query, usage = rewrite_query(query)
+    return _search(search_query, top_k, candidate_k), usage
+
+
+@traceable(run_type="retriever", name="hybrid_search", process_outputs=as_documents)
+def _search(query: str, top_k: int, candidate_k: int) -> List[ContextItem]:
+    store = _store()
+    embedding = store.manifest.get("embedding", {})
+    annotate(embedding_model=embedding.get("model"), index_created_at=store.manifest.get("created_at"),
+             embedding_runtime=get_settings().embedding.runtime)
+    ranked = hybrid_search(query, store, top_k=top_k, candidate_k=candidate_k)
     return [_to_context(item, index) for index, item in enumerate(ranked, 1)]
 
 

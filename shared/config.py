@@ -96,6 +96,13 @@ class Paths:
 
 
 @dataclass(frozen=True)
+class TracingSettings:
+    # SDK langsmith tu doc LANGSMITH_* (API key, project, endpoint, sampling); o day chi giu cai code can dung.
+    enabled: bool  # LANGSMITH_TRACING
+    git_commit: str  # GIT_COMMIT, gan luc build image; ghi vao metadata moi trace
+
+
+@dataclass(frozen=True)
 class Settings:
     embedding: EmbeddingSettings
     reranker: RerankerSettings
@@ -105,6 +112,7 @@ class Settings:
     preload_vector_index: bool
     preload_wiki_cache: bool
     force_cuda: bool
+    tracing: TracingSettings
 
 
 @lru_cache(maxsize=1)
@@ -150,6 +158,10 @@ def get_settings() -> Settings:
         preload_vector_index=_env_bool("PRELOAD_VECTOR_INDEX", True),
         preload_wiki_cache=_env_bool("PRELOAD_WIKI_CACHE", True),
         force_cuda=_env_bool("FORCE_CUDA", False),
+        tracing=TracingSettings(
+            enabled=_env_bool("LANGSMITH_TRACING", False),
+            git_commit=_env("GIT_COMMIT", "unknown"),
+        ),
     )
 
 

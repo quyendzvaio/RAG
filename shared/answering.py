@@ -5,9 +5,11 @@ Hai service chi khac nhau o ham retrieve va cau chu cua prompt (`PromptStyle`).
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Tuple
 
+from shared.config import get_settings
 from shared.http import timer_ms
 from shared.llm import complete
 from shared.schemas import AskRequest, ChatMessage, ContextItem, ServiceAnswer
+from shared.tracing import annotate, text_version, traceable
 
 
 # (query, top_k, candidate_k) -> contexts
@@ -55,8 +57,31 @@ WIKI_PROMPT = PromptStyle(
 )
 
 
+def _trace_inputs(inputs: dict) -> dict:
+    return {"service": inputs["service"], **inputs["request"].model_dump()}
+
+
+def _trace_outputs(answer: ServiceAnswer) -> dict:
+    # Context day du da nam o run retriever ben duoi; o day chi giu phan de doc nhanh.
+    return {
+        "answer": answer.answer,
+        "citations": answer.citations,
+        "context_count": len(answer.contexts),
+        "token_usage": answer.token_usage,
+        "latency_ms": answer.latency_ms,
+        "error": answer.error,
+    }
+
+
+@traceable(name="answer_question", process_inputs=_trace_inputs, process_outputs=_trace_outputs)
 def answer_question(service: str, request: AskRequest, retrieve: Retriever, style: PromptStyle) -> ServiceAnswer:
     """Retrieve roi tra loi; moi loi deu tra ve ServiceAnswer(error=...) thay vi raise."""
+    annotate(
+        service=service,
+        prompt_version=text_version(style.system, style.instructions, style.context_label),
+        llm_model=get_settings().deepseek.model,
+        git_commit=get_settings().tracing.git_commit,
+    )
     with timer_ms() as elapsed:
         try:
             contexts = retrieve(request.question, request.top_k, request.candidate_k)

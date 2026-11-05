@@ -8,10 +8,12 @@ from shared.config import get_settings
 from shared.http import DEFAULT_TIMEOUT, timer_ms
 from shared.log import setup_logging
 from shared.schemas import ChatRequest, ChatResponse, HealthResponse
+from shared.tracing import add_tracing, get_current_run_tree, traceable, tracing_context
 
 
 setup_logging()
 app = FastAPI(title="llm-service", version="0.1.0")
+add_tracing(app)
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -42,15 +44,12 @@ def chat(request: ChatRequest) -> ChatResponse:
             "temperature": request.temperature,
             "max_tokens": request.max_tokens,
         }
-        headers = {
-            "Authorization": f"Bearer {settings.api_key}",
-            "Content-Type": "application/json",
-        }
+        # Chi trace khi request thuoc mot trace (header tu service goi den): loi goi le nhu wiki builder hay giam
+        # khao RAGAS khong tao trace rieng cho tung lan goi.
+        traced = get_current_run_tree() is not None
         try:
-            with httpx.Client(timeout=DEFAULT_TIMEOUT) as client:
-                response = client.post(settings.chat_completions_url, json=payload, headers=headers)
-                response.raise_for_status()
-                data = _parse_completion(response.text)
+            with tracing_context(enabled=None if traced else False):
+                data = _chat_completion(payload, langsmith_extra={"metadata": {"ls_model_name": model}})
         except Exception as exc:
             return ChatResponse(
                 model=model,
@@ -69,6 +68,31 @@ def chat(request: ChatRequest) -> ChatResponse:
         token_usage=usage,
         latency_ms=elapsed(),
     )
+
+
+@traceable(
+    run_type="llm",
+    name="chat_completions",
+    process_inputs=lambda inputs: inputs["payload"],
+    process_outputs=lambda data: {**data, "usage_metadata": _usage_metadata(data.get("usage") or {})},
+)
+def _chat_completion(payload: Dict) -> Dict:
+    """Mot lan goi provider; API key chi nam trong header nen khong vao input cua trace."""
+    settings = get_settings().deepseek
+    headers = {"Authorization": f"Bearer {settings.api_key}", "Content-Type": "application/json"}
+    with httpx.Client(timeout=DEFAULT_TIMEOUT) as client:
+        response = client.post(settings.chat_completions_url, json=payload, headers=headers)
+        response.raise_for_status()
+        return _parse_completion(response.text)
+
+
+def _usage_metadata(usage: Dict) -> Dict[str, int]:
+    """Dang token LangSmith doc de cong token/chi phi cua trace."""
+    return {
+        "input_tokens": int(usage.get("prompt_tokens") or 0),
+        "output_tokens": int(usage.get("completion_tokens") or 0),
+        "total_tokens": int(usage.get("total_tokens") or 0),
+    }
 
 
 def _parse_completion(text: str) -> Dict:

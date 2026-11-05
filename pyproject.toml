@@ -13,6 +13,8 @@ dependencies = [
     "langchain-community>=0.4.2",
     "langchain-core>=0.2.0",
     "langchain-text-splitters>=0.2.0",
+    # Tracing (shared/tracing.py); bat bang LANGSMITH_TRACING=true.
+    "langsmith>=0.14.16",
     "python-dotenv>=1.0.0",
     "uvicorn>=0.30.0",
 ]

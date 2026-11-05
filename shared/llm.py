@@ -7,7 +7,7 @@ from typing import Dict, List, Optional
 import httpx
 
 from shared.config import get_settings
-from shared.http import DEFAULT_TIMEOUT
+from shared.http import DEFAULT_TIMEOUT, service_client
 from shared.schemas import ChatMessage, ChatRequest, ChatResponse
 
 
@@ -39,7 +39,7 @@ def complete(
     `model` rong = model llm-service cau hinh (DEEPSEEK_MODEL); dat de goi model khac qua cung provider.
     """
     request = ChatRequest(messages=messages, model=model, temperature=temperature, max_tokens=max_tokens)
-    with httpx.Client(timeout=timeout) as client:
+    with service_client(timeout) as client:
         response = client.post(f"{get_settings().services.llm}/chat", json=request.model_dump())
         response.raise_for_status()
     chat = ChatResponse(**response.json())

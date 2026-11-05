@@ -1,5 +1,7 @@
 COMPOSE ?= docker compose
 EVAL_TAG ?= latest
+# Commit cua code dua vao image (metadata trace LangSmith); -dirty khi con thay doi chua commit.
+export GIT_COMMIT ?= $(shell git describe --always --dirty 2>/dev/null || echo unknown)
 
 .PHONY: prepare-wiki-sources docker-build docker-up docker-down docker-logs docker-vector-logs docker-wiki-logs docker-build-vector-index build-wiki-layer docker-rebuild-all-data docker-clean-volumes eval-golden eval-retrieval eval-ragas-deps eval-ragas analyze-ingestion
 

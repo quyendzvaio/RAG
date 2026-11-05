@@ -1,14 +1,28 @@
+# Tracing LangSmith (tat mac dinh): bien lay tu .env cua thu muc nay; gan cho cac service tham gia luong hoi dap.
+x-tracing-env: &tracing-env
+  LANGSMITH_TRACING: ${LANGSMITH_TRACING:-false}
+  LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
+  LANGSMITH_PROJECT: ${LANGSMITH_PROJECT:-legal-rag}
+  LANGSMITH_ENDPOINT: ${LANGSMITH_ENDPOINT:-https://api.smith.langchain.com}
+  LANGSMITH_TRACING_SAMPLING_RATE: ${LANGSMITH_TRACING_SAMPLING_RATE:-1}
+  LANGSMITH_HIDE_INPUTS: ${LANGSMITH_HIDE_INPUTS:-false}
+  LANGSMITH_HIDE_OUTPUTS: ${LANGSMITH_HIDE_OUTPUTS:-false}
+  # Chi de ghi dung model vao metadata trace; llm-service doc model tu .env mount rieng.
+  DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-chat}
+
 services:
   api-gateway:
     build:
       context: .
       args:
         INSTALL_EMBEDDINGS: "true"
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
     image: rag-ttcsn:cpu
     command: ["uvicorn", "services.api_gateway.app:app", "--host", "0.0.0.0", "--port", "7860"]
     ports:
       - "7860:7860"
     environment:
+      <<: *tracing-env
       VECTOR_SERVICE_URL: http://vector-rag-service:8001
       WIKI_SERVICE_URL: http://wiki-rag-service:8002
       EVALUATOR_SERVICE_URL: http://evaluator-service:8004
@@ -29,8 +43,10 @@ services:
       context: .
       args:
         INSTALL_EMBEDDINGS: "true"
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
     command: ["uvicorn", "services.vector_rag_service.app:app", "--host", "0.0.0.0", "--port", "8001"]
     environment:
+      <<: *tracing-env
       EMBEDDING_BACKEND: ${EMBEDDING_BACKEND:-sentence-transformers}
       EMBEDDING_PROFILE: ${EMBEDDING_PROFILE:-vietnamese}
       EMBEDDING_DEVICE: ${EMBEDDING_DEVICE:-auto}
@@ -59,8 +75,10 @@ services:
       context: .
       args:
         INSTALL_EMBEDDINGS: "true"
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
     command: ["uvicorn", "services.wiki_rag_service.app:app", "--host", "0.0.0.0", "--port", "8002"]
     environment:
+      <<: *tracing-env
       WIKI_DIR: /app/wiki_data/wiki
       PRELOAD_WIKI_CACHE: ${PRELOAD_WIKI_CACHE:-true}
       LLM_SERVICE_URL: http://llm-service:8003
@@ -80,7 +98,10 @@ services:
       context: .
       args:
         INSTALL_EMBEDDINGS: "true"
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
     command: ["uvicorn", "services.llm_service.app:app", "--host", "0.0.0.0", "--port", "8003"]
+    environment:
+      <<: *tracing-env
     extra_hosts:
       - "host.docker.internal:host-gateway"  # proxy LLM chay tren host (DEEPSEEK_BASE_URL=http://host.docker.internal:...)
     volumes:
@@ -99,6 +120,7 @@ services:
       context: .
       args:
         INSTALL_EMBEDDINGS: "true"
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
     command: ["uvicorn", "services.evaluator_service.app:app", "--host", "0.0.0.0", "--port", "8004"]
     environment:
       EVAL_DB_PATH: /app/eval_data/eval.db

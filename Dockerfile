@@ -45,6 +45,10 @@ RUN useradd --create-home --shell /bin/sh appuser \
     && chown -R appuser:appuser /app /cache \
     && chmod +x /app/docker-entrypoint.sh
 
+# Commit cua code trong image, ghi vao metadata trace (make docker-build truyen vao); dat cuoi de khong lam mat cache.
+ARG GIT_COMMIT=unknown
+ENV GIT_COMMIT=${GIT_COMMIT}
+
 EXPOSE 7860 8001 8002 8003 8004
 
 ENTRYPOINT ["/app/docker-entrypoint.sh"]

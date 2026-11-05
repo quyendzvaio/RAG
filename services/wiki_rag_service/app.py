@@ -13,6 +13,7 @@ from shared.http import timer_ms
 from shared.llm import add_usage
 from shared.log import setup_logging
 from shared.schemas import AskRequest, ContextItem, HealthResponse, SearchRequest, ServiceAnswer
+from shared.tracing import add_tracing, annotate, as_documents, traceable
 
 
 SERVICE_NAME = "wiki-rag-service"
@@ -29,6 +30,7 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title=SERVICE_NAME, version="0.1.0", lifespan=lifespan)
+add_tracing(app)
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -83,8 +85,12 @@ def _preload() -> None:
         logger.warning("Khong preload duoc lop wiki: %s", exc)
 
 
+@traceable(run_type="retriever", name="select_wiki_pages",
+           process_outputs=lambda result: {**as_documents(result[0]), "token_usage": result[1]})
 def _retrieve(query: str, top_k: int) -> tuple:
     """(cac trang wiki LLM chon, token dung de chon). Khong co BM25 hay Dieu goc."""
-    pages, usage = wiki_layer().select(query, max_pages=min(top_k, MAX_PAGES))
+    layer = wiki_layer()
+    annotate(wiki_index_mtime=layer.version, wiki_page_count=len(layer.pages))
+    pages, usage = layer.select(query, max_pages=min(top_k, MAX_PAGES))
     logger.info("Trang wiki cho '%s': %s", query[:60], [page.path for page in pages])
     return [page.context() for page in pages], usage

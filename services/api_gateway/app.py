@@ -1,5 +1,4 @@
 import logging
-from concurrent.futures import ThreadPoolExecutor
 
 import gradio as gr
 from fastapi import FastAPI
@@ -10,6 +9,7 @@ from shared.config import get_settings
 from shared.http import service_client
 from shared.log import setup_logging
 from shared.schemas import AskRequest, CompareResponse, EvaluationRecord, HealthResponse, ServiceAnswer
+from shared.tracing import ContextThreadPoolExecutor, traceable, uuid7
 
 
 setup_logging()
@@ -31,14 +31,37 @@ def health() -> HealthResponse:
 
 @app.post("/ask/compare", response_model=CompareResponse)
 def ask_compare(request: AskRequest) -> CompareResponse:
-    with ThreadPoolExecutor(max_workers=2) as executor:
+    # request_id cung la id trace goc tren LangSmith, va duoc luu vao eval_runs: tu mot dong SQLite tim duoc trace.
+    request_id = str(uuid7())
+    settings = get_settings()
+    metadata = {"request_id": request_id, "git_commit": settings.tracing.git_commit,
+                "llm_model": settings.deepseek.model, **request.model_dump(exclude={"question"})}
+    return _compare(request, request_id, langsmith_extra={"run_id": request_id, "metadata": metadata})
+
+
+def _compare_outputs(response: CompareResponse) -> dict:
+    return {
+        "vector_answer": response.vector.answer,
+        "wiki_answer": response.wiki.answer,
+        "errors": {"vector": response.vector.error, "wiki": response.wiki.error},
+        "eval_run_id": response.run_id,
+        "metrics": {metric.name: metric.value for metric in response.metrics},
+    }
+
+
+@traceable(name="ask_compare", process_inputs=lambda inputs: inputs["request"].model_dump(),
+           process_outputs=_compare_outputs)
+def _compare(request: AskRequest, request_id: str) -> CompareResponse:
+    # ContextThreadPoolExecutor: hai luong con giu run hien tai, nen hai service noi vao cung mot trace.
+    with ContextThreadPoolExecutor(max_workers=2) as executor:
         vector_future = executor.submit(_ask_vector_service, request)
         wiki_future = executor.submit(_ask_wiki_service, request)
         vector = vector_future.result()
         wiki = wiki_future.result()
 
-    run_id, metrics = _evaluate(request.question, vector, wiki)
-    return CompareResponse(question=request.question, vector=vector, wiki=wiki, metrics=metrics, run_id=run_id)
+    run_id, metrics = _evaluate(request.question, vector, wiki, request_id)
+    return CompareResponse(question=request.question, vector=vector, wiki=wiki, metrics=metrics, run_id=run_id,
+                           request_id=request_id)
 
 
 @app.post("/ask/vector", response_model=ServiceAnswer)
@@ -69,10 +92,10 @@ def _call_answer(service: str, url: str, request: AskRequest) -> ServiceAnswer:
         return ServiceAnswer(service=service, question=request.question, answer="", error=str(exc))
 
 
-def _evaluate(question: str, vector: ServiceAnswer, wiki: ServiceAnswer):
+def _evaluate(question: str, vector: ServiceAnswer, wiki: ServiceAnswer, request_id: str):
     """Ghi lan chay vao evaluator; loi evaluator khong lam hong cau tra loi."""
     try:
-        record = EvaluationRecord(question=question, vector_answer=vector, wiki_answer=wiki)
+        record = EvaluationRecord(question=question, vector_answer=vector, wiki_answer=wiki, request_id=request_id)
         with service_client() as client:
             response = client.post(f"{SERVICES.evaluator}/eval/run", json=record.model_dump())
             response.raise_for_status()
@@ -132,7 +155,7 @@ def _format_answer(answer: ServiceAnswer) -> str:
 
 
 def _format_metrics(response: CompareResponse) -> str:
-    lines = [f"Run ID: {response.run_id}", ""]
+    lines = [f"Run ID: {response.run_id}", f"Request ID (trace LangSmith): {response.request_id}", ""]
     for metric in response.metrics:
         lines.append(f"{metric.name}: {metric.value} - {metric.explanation}")
     return "\n".join(lines)
