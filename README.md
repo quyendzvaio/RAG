@@ -49,7 +49,8 @@ Cần Docker (có Compose) và một API chat tương thích OpenAI (DeepSeek, h
 cp .env.example .env          # điền API key, endpoint, model
 python3 check_env.py
 
-make docker-build
+make docker-build                            # image dịch vụ, không có torch
+make export-onnx                             # một lần: export model embedding sang ONNX vào volume model_cache
 make prepare-wiki-sources                    # data_raw -> wiki_data/raw_sources
 make docker-build-vector-index               # FAISS + BM25
 make build-wiki-layer SOURCES="aec013b7 059ac230 62aa0284"   # LLM viết wiki cho các đề mục này (tốn token)
@@ -125,13 +126,13 @@ Thời gian truy xuất đo qua API (không gồm LLM trả lời): p50 khoảng
 
 Model embedding là `bkai-foundation-models/vietnamese-bi-encoder`. Trên CPU nó chạy bằng ONNX Runtime (`EMBEDDING_RUNTIME=onnx`, mặc định).
 
-- **Cách hoạt động:** lần chạy đầu, model được export sang ONNX và tối ưu đồ thị, rồi cache trong volume `model_cache` (`/cache/onnx`).
+- **Cách hoạt động:** `make export-onnx` export model sang ONNX và tối ưu đồ thị một lần, rồi cache trong volume `model_cache` (`/cache/onnx`). Image dịch vụ chỉ nạp bản đã export; thiếu thì service báo lỗi và nhắc chạy lệnh này.
 - **Kết quả trên 150 câu golden:**
   - vector khớp bản PyTorch (sai khác < 10⁻⁶), nên hai runtime dùng chung một index;
   - top-5 truy xuất giống hệt cả 150 câu;
   - thời gian nhúng một câu hỏi giảm từ 77 ms xuống 34 ms.
 - **Không lượng tử hóa int8:** trên CPU chỉ có AVX2, int8 làm vector lệch quá nhiều (cosine chỉ còn 0.71–0.84).
-- **Khi nào dùng PyTorch:** khi có GPU, hoặc khi đặt `EMBEDDING_RUNTIME=torch`.
+- **Không có torch:** image và `uv.lock` không chứa torch, nhờ vậy image chỉ còn 1,3 GB (trước là 2,7 GB). `make export-onnx` cài torch tạm trong một container chạy xong thì xóa. Chạy embedding bằng torch (`EMBEDDING_RUNTIME=torch`, GPU) hay CrossEncoder (`RERANKER_MODEL`) cần môi trường tự cài torch, ví dụ máy GPU trên Kaggle.
 
 Máy local có 16 GB RAM và GPU cũ nên mọi thứ chạy trên CPU. Việc build index nặng nên chạy trên máy có GPU rồi chép index về.
 
@@ -242,7 +243,7 @@ ask_compare (gateway; metadata: request_id, git_commit, llm_model, top_k, use_ll
 
 ## Phát triển
 
-Dependency được quản lý bằng [uv](https://docs.astral.sh/uv/): `pyproject.toml` khai báo, `uv.lock` ghim phiên bản, image cài bằng `uv sync --frozen`.
+Dependency được quản lý bằng [uv](https://docs.astral.sh/uv/): `pyproject.toml` khai báo, `uv.lock` ghim phiên bản, image cài bằng `uv sync --frozen`. `uv` chỉ có mặt lúc build, không nằm trong image; cần cài `uv` trên máy để chạy `uv lock` và `make eval-ragas-deps`.
 
 ```bash
 uv sync --extra embeddings    # chạy ngoài Docker; torch lấy từ index CPU của PyTorch
@@ -254,7 +255,7 @@ uv sync --extra embeddings    # chạy ngoài Docker; torch lấy từ index CPU
 
 ## Ghi chú vận hành
 
-- Lần khởi động đầu mất vài giây để nạp vector index và lớp wiki. Lần đầu dùng ONNX còn mất thêm thời gian export model.
+- Lần khởi động đầu mất vài giây để nạp vector index và lớp wiki.
 - Wiki service chỉ trả lời được các đề mục đã build; câu ngoài phạm vi nhận "không tìm thấy trang".
 - Khi kết quả bất thường, xem log service và các trường `error`, `fallback` trước khi nghi phần truy xuất. Service trả lỗi bằng HTTP 200 kèm `error`, và llm-service trả văn bản tạm khi gọi LLM lỗi.
 - Chi tiết kỹ thuật cho người phát triển xem `CLAUDE.md`.

@@ -5,6 +5,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 from langchain_core.embeddings import Embeddings
 
 from rag.device import choose_torch_device
+from rag.onnx_embeddings import OnnxEmbeddings, OnnxModelMissing
 from shared.config import EmbeddingSettings, get_settings
 
 
@@ -58,9 +59,9 @@ def get_embedding_model(config: Optional[EmbeddingSettings] = None):
             # ONNX Runtime chi chay CPU o day; co GPU (vd. build index tren Kaggle) thi torch nhanh hon.
             if config.runtime == "onnx" and choice.device == "cpu":
                 try:
-                    from rag.onnx_embeddings import OnnxEmbeddings
-
                     return OnnxEmbeddings(config.model, config.onnx_dir, config.batch_size)
+                except OnnxModelMissing:
+                    raise
                 except Exception as exc:
                     logger.warning("Khong dung duoc ONNX Runtime, dung PyTorch: %s", exc)
 
@@ -71,6 +72,8 @@ def get_embedding_model(config: Optional[EmbeddingSettings] = None):
                 model_kwargs={"device": choice.device},
                 encode_kwargs={"batch_size": config.batch_size, "normalize_embeddings": True},
             )
+        except OnnxModelMissing:
+            raise  # khong lui ve hashing: index se bi build/nap bang vector vo nghia
         except Exception as exc:
             logger.warning(
                 "Khong tai duoc HuggingFaceEmbeddings, dung fallback hashing "

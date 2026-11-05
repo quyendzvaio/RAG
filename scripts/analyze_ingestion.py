@@ -41,11 +41,8 @@ print("ky tu/parent: median", statistics.median(lens), "p90", q(lens, 90), "p99"
 
 print("\n== CHUNKING (parent-child) + EMBEDDING INPUT ==")
 try:
-    from sentence_transformers import SentenceTransformer
-    model = SentenceTransformer("bkai-foundation-models/vietnamese-bi-encoder", device="cpu")
-    tok = model.tokenizer
-    def count(text): return len(tok(text, add_special_tokens=False, verbose=False)["input_ids"])
-    max_tokens = model.max_seq_length
+    from rag.embeddings import get_embedding_model, token_counter
+    count, max_tokens = token_counter(get_embedding_model())  # tokenizer cua model ONNX da export, khong can torch
 except Exception as exc:
     print("khong tai duoc tokenizer, uoc luong theo ky tu:", exc)
     def count(text): return len(text) // 3 + 1

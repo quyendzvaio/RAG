@@ -25,6 +25,10 @@ ONNX_OPSET = 17
 POOLING_MODES = ("mean", "cls")
 
 
+class OnnxModelMissing(RuntimeError):
+    """Chua co model ONNX va image khong co torch de export (image dich vu rag-ttcsn:cpu)."""
+
+
 class OnnxEmbeddings(Embeddings):
     def __init__(self, model_name: str, onnx_dir: str, batch_size: int):
         import onnxruntime as ort
@@ -32,6 +36,12 @@ class OnnxEmbeddings(Embeddings):
 
         directory = Path(onnx_dir) / model_name.replace("/", "--")
         if not (directory / META_FILE).exists():
+            try:
+                import torch  # noqa: F401
+            except ImportError as exc:
+                raise OnnxModelMissing(
+                    f"Chua co model ONNX tai {directory} va image khong co torch de export: chay `make export-onnx`"
+                ) from exc
             export_onnx(model_name, directory)
         meta = json.loads((directory / META_FILE).read_text(encoding="utf-8"))
         self.tokenizer = AutoTokenizer.from_pretrained(str(directory))

@@ -2,8 +2,12 @@ COMPOSE ?= docker compose
 EVAL_TAG ?= latest
 # Commit cua code dua vao image (metadata trace LangSmith); -dirty khi con thay doi chua commit.
 export GIT_COMMIT ?= $(shell git describe --always --dirty 2>/dev/null || echo unknown)
+MODEL_CACHE ?= rag_model_cache
+UV_BIN ?= $(shell command -v uv)
+# Chi dung cho make export-onnx: cai tam trong container, khong vao image hay uv.lock.
+EXPORT_DEPS ?= torch==2.3.1+cpu sentence-transformers==3.0.1 onnx==1.17.0
 
-.PHONY: prepare-wiki-sources docker-build docker-up docker-down docker-logs docker-vector-logs docker-wiki-logs docker-build-vector-index build-wiki-layer docker-rebuild-all-data docker-clean-volumes eval-golden eval-retrieval eval-ragas-deps eval-ragas analyze-ingestion
+.PHONY: prepare-wiki-sources docker-build docker-up docker-down docker-logs docker-vector-logs docker-wiki-logs docker-build-vector-index build-wiki-layer docker-rebuild-all-data docker-clean-volumes eval-golden eval-retrieval eval-ragas-deps eval-ragas analyze-ingestion export-onnx
 
 # Chay trong container (host khong can langchain); ghi ra ./wiki_data/raw_sources.
 prepare-wiki-sources:
@@ -12,6 +16,17 @@ prepare-wiki-sources:
 
 docker-build:
 	$(COMPOSE) build
+
+# Export model embedding sang ONNX vao volume model_cache (mot lan, hoac sau khi doi EMBEDDING_PROFILE/MODEL).
+# Image khong co torch: lenh nay cai torch + sentence-transformers vao /tmp cua mot container tam (dung uv cua host,
+# ghim cac goi da co trong image), export, roi container bi xoa. Service bao loi va nhac lenh nay khi thieu model.
+export-onnx:
+	$(COMPOSE) run --rm --no-deps -u root --entrypoint "" -v $(UV_BIN):/usr/local/bin/uv:ro vector-rag-service sh -c '\
+		uv pip freeze --python /opt/venv/bin/python > /tmp/pins.txt \
+		&& uv pip install --python /opt/venv/bin/python --target /tmp/export-deps -c /tmp/pins.txt \
+			--extra-index-url https://download.pytorch.org/whl/cpu --index-strategy unsafe-best-match $(EXPORT_DEPS) \
+		&& PYTHONPATH=/tmp/export-deps:/app python -c "from rag.embeddings import get_embedding_model; print(type(get_embedding_model()).__name__)" \
+		&& chown -R appuser:appuser /cache'
 
 docker-up:
 	$(COMPOSE) up --remove-orphans
@@ -50,10 +65,12 @@ eval-retrieval:
 	python3 scripts/eval_retrieval.py --tag $(EVAL_TAG) $(ARGS)
 
 # RAGAS: ragas cai vao volume rag_eval_deps (mot lan), khong vao image dich vu. Can stack dang chay.
+# Image khong co uv: xuat danh sach goi bang uv tren host, roi mount chinh uv cua host vao container de cai.
 eval-ragas-deps:
-	$(COMPOSE) run --rm --no-deps -u root --entrypoint "" -v rag_eval_deps:/deps vector-rag-service \
-		sh -c 'uv export --frozen --only-group eval --no-hashes --no-emit-project -o /tmp/eval.txt \
-		&& uv pip install --target /deps -r /tmp/eval.txt && chown -R 1000:1000 /deps'
+	mkdir -p .cache && uv export --frozen --only-group eval --no-hashes --no-emit-project -o .cache/eval-requirements.txt
+	$(COMPOSE) run --rm --no-deps -u root --entrypoint "" -v rag_eval_deps:/deps -v $(UV_BIN):/usr/local/bin/uv:ro \
+		-v ./.cache/eval-requirements.txt:/tmp/eval.txt:ro vector-rag-service \
+		sh -c 'uv pip install --python /opt/venv/bin/python --target /deps -r /tmp/eval.txt && chown -R 1000:1000 /deps'
 
 # vd: make eval-ragas EVAL_TAG=ragas-v1 ARGS="--limit 5"
 eval-ragas:
@@ -62,6 +79,6 @@ eval-ragas:
 
 # Bao cao chat luong parse/chunk/embedding input/wiki lookup (can wiki_data/raw_sources va model_cache).
 analyze-ingestion:
-	docker run --rm --entrypoint python -e HF_HOME=/cache/huggingface -e SENTENCE_TRANSFORMERS_HOME=/cache/sentence-transformers \
-		-v ./data_raw:/app/data_raw:ro -v ./wiki_data:/app/wiki_data:ro -v ./scripts:/app/scripts:ro -v rag_model_cache:/cache \
+	docker run --rm --entrypoint python \
+		-v ./data_raw:/app/data_raw:ro -v ./wiki_data:/app/wiki_data:ro -v ./scripts:/app/scripts:ro -v $(MODEL_CACHE):/cache \
 		rag-ttcsn:cpu scripts/analyze_ingestion.py

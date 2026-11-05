@@ -12,12 +12,8 @@ x-tracing-env: &tracing-env
 
 services:
   api-gateway:
-    build:
-      context: .
-      args:
-        INSTALL_EMBEDDINGS: "true"
-        GIT_COMMIT: ${GIT_COMMIT:-unknown}
     image: rag-ttcsn:cpu
+    pull_policy: never  # image do vector-rag-service build
     command: ["uvicorn", "services.api_gateway.app:app", "--host", "0.0.0.0", "--port", "7860"]
     ports:
       - "7860:7860"
@@ -42,7 +38,7 @@ services:
     build:
       context: .
       args:
-        INSTALL_EMBEDDINGS: "true"
+        EMBEDDINGS: ${EMBEDDINGS:-onnx}  # onnx: ONNX Runtime, khong torch; none: chi HashingEmbeddings
         GIT_COMMIT: ${GIT_COMMIT:-unknown}
     command: ["uvicorn", "services.vector_rag_service.app:app", "--host", "0.0.0.0", "--port", "8001"]
     environment:
@@ -66,16 +62,13 @@ services:
       interval: 15s
       timeout: 5s
       retries: 8
-      start_period: 90s
+      # Nap FAISS + BM25 + ONNX truoc khi mo cong; may yeu hoac dang nghen IO co the mat vai phut.
+      start_period: 300s
     restart: unless-stopped
 
   wiki-rag-service:
     image: rag-ttcsn:cpu
-    build:
-      context: .
-      args:
-        INSTALL_EMBEDDINGS: "true"
-        GIT_COMMIT: ${GIT_COMMIT:-unknown}
+    pull_policy: never  # image do vector-rag-service build
     command: ["uvicorn", "services.wiki_rag_service.app:app", "--host", "0.0.0.0", "--port", "8002"]
     environment:
       <<: *tracing-env
@@ -94,11 +87,7 @@ services:
 
   llm-service:
     image: rag-ttcsn:cpu
-    build:
-      context: .
-      args:
-        INSTALL_EMBEDDINGS: "true"
-        GIT_COMMIT: ${GIT_COMMIT:-unknown}
+    pull_policy: never  # image do vector-rag-service build
     command: ["uvicorn", "services.llm_service.app:app", "--host", "0.0.0.0", "--port", "8003"]
     environment:
       <<: *tracing-env
@@ -116,11 +105,7 @@ services:
 
   evaluator-service:
     image: rag-ttcsn:cpu
-    build:
-      context: .
-      args:
-        INSTALL_EMBEDDINGS: "true"
-        GIT_COMMIT: ${GIT_COMMIT:-unknown}
+    pull_policy: never  # image do vector-rag-service build
     command: ["uvicorn", "services.evaluator_service.app:app", "--host", "0.0.0.0", "--port", "8004"]
     environment:
       EVAL_DB_PATH: /app/eval_data/eval.db

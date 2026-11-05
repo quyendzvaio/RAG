@@ -20,13 +20,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Embedding that (khong co thi dung HashingEmbeddings, chi de smoke test). torch lay tu index CPU cua PyTorch,
-# khong thi keo ca bo CUDA vai GB.
-embeddings = [
-    "torch==2.3.1",
-    "sentence-transformers==3.0.1",
+# Embedding bang ONNX Runtime tu model da export trong model_cache; transformers chi de nap tokenizer. Khong co
+# torch: export ONNX (make export-onnx) cai torch tam trong mot container roi bo. Khong co extra nay thi dung
+# HashingEmbeddings (chi de smoke test).
+onnx = [
     "onnxruntime==1.20.1",
-    "onnx==1.17.0",
+    "transformers>=4.41.0",
 ]
 
 [dependency-groups]
@@ -39,11 +38,3 @@ eval = [
 [tool.uv]
 package = false
 environments = ["sys_platform == 'linux'"]
-
-[tool.uv.sources]
-torch = [{ index = "pytorch-cpu" }]
-
-[[tool.uv.index]]
-name = "pytorch-cpu"
-url = "https://download.pytorch.org/whl/cpu"
-explicit = true

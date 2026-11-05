@@ -10,3 +10,6 @@ eval_data/
 vector_data/
 
 .env
+
+# File tam cua make (vd. eval-requirements.txt)
+.cache/
