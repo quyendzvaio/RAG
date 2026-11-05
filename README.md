@@ -43,7 +43,7 @@ Phần còn thiếu chủ yếu đến từ khoảng 5% câu truy xuất trượ
 
 ## Bắt đầu nhanh
 
-Cần Docker (có Compose) và một API chat tương thích OpenAI (DeepSeek, hoặc proxy như 9router).
+Cần Docker (có Compose), [uv](https://docs.astral.sh/uv/) trên máy (dùng cho `make export-onnx` và `make eval-ragas-deps`) và một API chat tương thích OpenAI (DeepSeek, hoặc proxy như 9router, kiraai).
 
 ```bash
 cp .env.example .env          # điền API key, endpoint, model
@@ -120,7 +120,7 @@ Cả năm service chạy từ cùng một image, chỉ khác lệnh khởi độ
 5. **Rerank.** Điểm cuối = 0.65 × rerank + 0.35 × điểm gộp, cả hai chuẩn hóa min-max.
 6. **Ưu tiên loại Điều.** Cộng điểm cho Điều có tiêu đề khớp loại câu hỏi, ví dụ "những ai…" → "Đối tượng áp dụng", "có hiệu lực khi nào" → "Hiệu lực".
 
-Thời gian truy xuất đo qua API (không gồm LLM trả lời): p50 khoảng 1,5 s, p95 khoảng 2,2 s trên CPU. Bước thêm dấu tốn thêm khoảng 1 s và 2 nghìn token cho mỗi câu hỏi mới.
+Thời gian truy xuất đo qua API (không gồm LLM trả lời): p50 khoảng 1,5 s, p95 khoảng 2,2 s trên CPU. Bước thêm dấu tốn thêm một lần gọi LLM cho mỗi câu hỏi mới: khoảng 1 s với `qwen3-14b`, vài giây với model có suy luận không tắt được như `qwen3.8-flash-next-sale`. Kết quả được cache theo câu hỏi, và token của bước này được cộng vào `token_usage`.
 
 ### Embedding bằng ONNX Runtime
 
@@ -243,10 +243,10 @@ ask_compare (gateway; metadata: request_id, git_commit, llm_model, top_k, use_ll
 
 ## Phát triển
 
-Dependency được quản lý bằng [uv](https://docs.astral.sh/uv/): `pyproject.toml` khai báo, `uv.lock` ghim phiên bản, image cài bằng `uv sync --frozen`. `uv` chỉ có mặt lúc build, không nằm trong image; cần cài `uv` trên máy để chạy `uv lock` và `make eval-ragas-deps`.
+Dependency được quản lý bằng [uv](https://docs.astral.sh/uv/): `pyproject.toml` khai báo, `uv.lock` ghim phiên bản, image cài bằng `uv sync --frozen`. `uv` chỉ có mặt lúc build, không nằm trong image; cần cài `uv` trên máy để chạy `uv lock`, `make export-onnx` và `make eval-ragas-deps`.
 
 ```bash
-uv sync --extra embeddings    # chạy ngoài Docker; torch lấy từ index CPU của PyTorch
+uv sync --extra onnx          # chạy ngoài Docker: onnxruntime + tokenizer, không có torch
 ```
 
 - **Đổi dependency:** sửa `pyproject.toml`, chạy `uv lock`, rồi `make docker-build`. Lock lệch với `pyproject.toml` thì build lỗi.
@@ -256,6 +256,7 @@ uv sync --extra embeddings    # chạy ngoài Docker; torch lấy từ index CPU
 ## Ghi chú vận hành
 
 - Lần khởi động đầu mất vài giây để nạp vector index và lớp wiki.
+- Khi provider trả 502/503/504 (ví dụ kiraai cắt request dài ở giây thứ 60), llm-service tự gọi lại một lần sau 2 s. Lỗi 4xx (402 hết tiền, 429 giới hạn) không gọi lại, mà trả văn bản tạm kèm `error`.
 - Wiki service chỉ trả lời được các đề mục đã build; câu ngoài phạm vi nhận "không tìm thấy trang".
 - Khi kết quả bất thường, xem log service và các trường `error`, `fallback` trước khi nghi phần truy xuất. Service trả lỗi bằng HTTP 200 kèm `error`, và llm-service trả văn bản tạm khi gọi LLM lỗi.
 - Chi tiết kỹ thuật cho người phát triển xem `CLAUDE.md`.
