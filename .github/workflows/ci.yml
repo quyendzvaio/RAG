@@ -1,0 +1,30 @@
+# CI cua project: chieu code + chay test truy xuat trong Docker.
+# Yeu can runner co Docker. Khong can torch, khong can index, khong goi LLM.
+
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build image (CPU, khong torch)
+        run: docker build -t rag-ttcsn:cpu --build-arg EMBEDDINGS=onnx .
+
+      - name: Python syntax check
+        run: >
+          docker run --rm --entrypoint python -e PYTHONPYCACHEPREFIX=/tmp/pycheck
+          -v ./:/app:ro rag-ttcsn:cpu -I -c
+          "import pathlib,sys; files=[f for f in pathlib.Path('rag').rglob('*.py')]+[f for f in pathlib.Path('shared').rglob('*.py')]+[f for f in pathlib.Path('services').rglob('*.py')]+[f for f in pathlib.Path('scripts').rglob('*.py')]; [compile(open(f, encoding='utf-8').read(), str(f), 'exec') for f in files]; print(f'compiled {len(files)} files')"
+
+      - name: Run unit tests
+        run: >
+          docker run --rm --entrypoint python -e PYTHONPATH=/app
+          -v ./tests:/app/tests:ro rag-ttcsn:cpu
+          -m unittest discover -s /app/tests -v

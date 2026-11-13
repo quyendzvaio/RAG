@@ -81,6 +81,7 @@ def answer_question(service: str, request: AskRequest, retrieve: Retriever, styl
         prompt_version=text_version(style.system, style.instructions, style.context_label),
         llm_model=get_settings().deepseek.model,
         git_commit=get_settings().tracing.git_commit,
+        use_llm=request.use_llm,
     )
     with timer_ms() as elapsed:
         try:

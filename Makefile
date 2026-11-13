@@ -82,3 +82,8 @@ analyze-ingestion:
 	docker run --rm --entrypoint python \
 		-v ./data_raw:/app/data_raw:ro -v ./wiki_data:/app/wiki_data:ro -v ./scripts:/app/scripts:ro -v $(MODEL_CACHE):/cache \
 		rag-ttcsn:cpu scripts/analyze_ingestion.py
+
+.PHONY: test
+test:
+	$(COMPOSE) run --rm --no-deps -u root -v ./tests:/app/tests -e PYTHONPATH=/app vector-rag-service \
+		python -m unittest discover -s /app/tests -v

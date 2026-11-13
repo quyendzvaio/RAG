@@ -5,6 +5,7 @@ reciprocal rank fusion -> rerank tren doan context se gui cho LLM.
 """
 import logging
 import re
+import time
 from dataclasses import dataclass, field
 from functools import lru_cache
 from itertools import chain
@@ -88,6 +89,21 @@ class RankedDocument:
     context: str = ""  # doan noi dung parent tra ve cho LLM
 
 
+@dataclass
+class RetrievalTiming:
+    """Thoi gian (ms) cua tung buoc truy xuat, de do p50/p95 rieng."""
+
+    embed_query_ms: float = 0.0
+    vector_search_ms: float = 0.0
+    bm25_search_ms: float = 0.0
+    fusion_ms: float = 0.0
+    rerank_ms: float = 0.0
+    total_ms: float = 0.0
+
+    def to_dict(self) -> Dict[str, float]:
+        return {key: round(value, 3) for key, value in self.__dict__.items()}
+
+
 class CrossEncoderReranker:
     """CrossEncoder neu cau hinh RERANKER_MODEL va tai duoc; neu khong `score` tra ve None."""
 
@@ -121,9 +137,21 @@ def get_reranker() -> CrossEncoderReranker:
     return CrossEncoderReranker(get_settings().reranker)
 
 
-def hybrid_search(question: str, store: HybridStore, top_k: int = 5, candidate_k: int = 40) -> List[RankedDocument]:
-    vector_hits, bm25_hits, matched = candidate_hits(question, store, candidate_k)
+def hybrid_search(
+    question: str,
+    store: HybridStore,
+    top_k: int = 5,
+    candidate_k: int = 40,
+    *,
+    timings: Optional[RetrievalTiming] = None,
+) -> List[RankedDocument]:
+    timings = timings or RetrievalTiming()
+    start = time.perf_counter()
+    vector_hits, bm25_hits, matched, vector_ms, bm25_ms = candidate_hits(question, store, candidate_k)
+    timings.vector_search_ms += vector_ms
+    timings.bm25_search_ms += bm25_ms
 
+    fusion_start = time.perf_counter()
     candidates: Dict[str, RankedDocument] = {}
     _merge_ranked_hits(candidates, vector_hits, "vector", VECTOR_WEIGHT)
     _merge_ranked_hits(candidates, bm25_hits, "bm25", BM25_WEIGHT)
@@ -131,7 +159,18 @@ def hybrid_search(question: str, store: HybridStore, top_k: int = 5, candidate_k
         candidate.matched_children = matched.get(key, [])
 
     fused = sorted(candidates.values(), key=lambda item: item.score, reverse=True)
-    return boost_article_intent(question, rerank(question, store, fused[:candidate_k]))[:top_k]
+    timings.fusion_ms += (time.perf_counter() - fusion_start) * 1000
+
+    rerank_start = time.perf_counter()
+    ranked = rerank(question, store, fused[:candidate_k])
+    timings.rerank_ms += (time.perf_counter() - rerank_start) * 1000
+
+    timings.total_ms += (time.perf_counter() - start) * 1000
+    logger.info(
+        "hybrid_search: vector=%.2fms bm25=%.2fms fusion=%.2fms rerank=%.2fms total=%.2fms",
+        timings.vector_search_ms, timings.bm25_search_ms, timings.fusion_ms, timings.rerank_ms, timings.total_ms,
+    )
+    return boost_article_intent(question, ranked)[:top_k]
 
 
 def expand_abbreviations(question: str) -> str:
@@ -154,9 +193,12 @@ def boost_article_intent(question: str, ranked: List[RankedDocument]) -> List[Ra
 
 def candidate_hits(
     question: str, store: HybridStore, candidate_k: int
-) -> Tuple[List[Tuple[Document, float]], List[Tuple[Document, float]], Dict[str, List[int]]]:
-    """(parent theo vector, parent theo BM25, parent_id -> child_index trung vector)."""
+) -> Tuple[List[Tuple[Document, float]], List[Tuple[Document, float]], Dict[str, List[int]], float, float]:
+    """(parent theo vector, parent theo BM25, parent_id -> child_index trung vector, ms vector, ms bm25)."""
+    vector_start = time.perf_counter()
     child_hits = _vector_search(store, question, candidate_k * CHILD_FANOUT)
+    vector_ms = (time.perf_counter() - vector_start) * 1000
+
     vector_hits: List[Tuple[Document, float]] = []
     matched: Dict[str, List[int]] = {}
     for child, distance in child_hits:
@@ -165,8 +207,11 @@ def candidate_hits(
             matched[parent_id] = []
             vector_hits.append((store.parents[parent_id], distance))
         matched[parent_id].append(child.metadata["child_index"])
+
+    bm25_start = time.perf_counter()
     bm25_hits = store.bm25_store.search_with_scores(expand_abbreviations(question), top_k=candidate_k)
-    return vector_hits[:candidate_k], bm25_hits, matched
+    bm25_ms = (time.perf_counter() - bm25_start) * 1000
+    return vector_hits[:candidate_k], bm25_hits, matched, vector_ms, bm25_ms
 
 
 def rerank(question: str, store: HybridStore, candidates: List[RankedDocument]) -> List[RankedDocument]:

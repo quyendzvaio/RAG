@@ -7,7 +7,7 @@ from typing import Dict, List, Tuple
 from fastapi import FastAPI, HTTPException
 
 from rag.data_loader import article_heading
-from rag.query_engine import RankedDocument, get_reranker, hybrid_search
+from rag.query_engine import RankedDocument, RetrievalTiming, get_reranker, hybrid_search
 from rag.vector_store import HybridStore, index_readiness, load_hybrid_vectorstore
 from services.vector_rag_service.query_rewrite import rewrite_query
 from shared.answering import VECTOR_PROMPT, answer_question
@@ -116,9 +116,11 @@ def _retrieve(query: str, top_k: int, candidate_k: int) -> Tuple[List[ContextIte
 def _search(query: str, top_k: int, candidate_k: int) -> List[ContextItem]:
     store = _store()
     embedding = store.manifest.get("embedding", {})
+    timings = RetrievalTiming()
     annotate(embedding_model=embedding.get("model"), index_created_at=store.manifest.get("created_at"),
              embedding_runtime=get_settings().embedding.runtime)
-    ranked = hybrid_search(query, store, top_k=top_k, candidate_k=candidate_k)
+    ranked = hybrid_search(query, store, top_k=top_k, candidate_k=candidate_k, timings=timings)
+    annotate(retrieval_timings_ms=timings.to_dict())
     return [_to_context(item, index) for index, item in enumerate(ranked, 1)]
 
 

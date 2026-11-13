@@ -133,7 +133,7 @@ def main() -> None:
     for index, row in enumerate(rows):
         for variant, field in VARIANTS.items():
             question = row[field]
-            vector_hits, bm25_hits, matched = candidate_hits(question, store, args.candidate_k)
+            vector_hits, bm25_hits, matched, _vector_ms, _bm25_ms = candidate_hits(question, store, args.candidate_k)
             fused = fuse(vector_hits, bm25_hits, VECTOR_WEIGHT, BM25_WEIGHT)
             rerank_scores = {}
             rerank_query = expand_abbreviations(question)  # nhu rag.query_engine.rerank
