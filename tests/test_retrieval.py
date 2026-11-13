@@ -11,6 +11,7 @@ from rag.bm25_store import BM25Index, BM25Store, tokenize  # noqa: E402
 from rag.chunking import split_parent_child  # noqa: E402
 from rag.query_engine import (  # noqa: E402
     RankedDocument,
+    RetrievalTiming,
     boost_article_intent,
     expand_abbreviations,
     hybrid_search,
@@ -38,10 +39,15 @@ def child(code: str, title: str = "", content: str = "x", index: int = 0) -> Doc
 
 
 class FakeVectorstore:
+    """Mo phong API FAISS ma _vector_search dung: _embed_query + search_by_vector."""
+
     def __init__(self, hits):
         self.hits = hits
 
-    def similarity_search_with_score(self, question, k):
+    def _embed_query(self, question):
+        return [0.0]
+
+    def similarity_search_with_score_by_vector(self, embedding, k):
         return self.hits[:k]
 
 
@@ -200,6 +206,33 @@ class FakeRetrievalTest(unittest.TestCase):
         codes = [r.document.metadata["article_code"] for r in res]
         assert "Điều 1" in codes
         assert len(res) <= 2
+
+
+class RetrievalTimingTest(unittest.TestCase):
+    def test_to_dict_rounds_and_keeps_every_step(self):
+        timing = RetrievalTiming(embed_query_ms=1.23456, vector_search_ms=2.5, bm25_search_ms=0.00001)
+        data = timing.to_dict()
+        assert set(data) == {
+            "embed_query_ms",
+            "vector_search_ms",
+            "bm25_search_ms",
+            "fusion_ms",
+            "rerank_ms",
+            "total_ms",
+        }
+        assert data["embed_query_ms"] == 1.235
+        assert data["bm25_search_ms"] == 0.0
+
+    def test_hybrid_search_fills_timings(self):
+        p1 = doc("Điều 1", "A", "A")
+        c1 = child("Điều 1", "A", "A child", 0)
+        store = FakeStore([(c1, 0.1)], [(p1, 0.1)], {"Điều 1": p1}, {"Điều 1": [c1]})
+        timing = RetrievalTiming()
+        hybrid_search("A", store, top_k=1, candidate_k=1, timings=timing)
+        assert timing.total_ms > 0
+        assert timing.embed_query_ms >= 0
+        assert timing.vector_search_ms >= 0
+        assert timing.bm25_search_ms >= 0
 
 
 if __name__ == "__main__":

@@ -147,7 +147,10 @@ def hybrid_search(
 ) -> List[RankedDocument]:
     timings = timings or RetrievalTiming()
     start = time.perf_counter()
-    vector_hits, bm25_hits, matched, vector_ms, bm25_ms = candidate_hits(question, store, candidate_k)
+    vector_hits, bm25_hits, matched, embed_ms, vector_ms, bm25_ms = candidate_hits(
+        question, store, candidate_k, timings
+    )
+    timings.embed_query_ms += embed_ms
     timings.vector_search_ms += vector_ms
     timings.bm25_search_ms += bm25_ms
 
@@ -167,8 +170,9 @@ def hybrid_search(
 
     timings.total_ms += (time.perf_counter() - start) * 1000
     logger.info(
-        "hybrid_search: vector=%.2fms bm25=%.2fms fusion=%.2fms rerank=%.2fms total=%.2fms",
-        timings.vector_search_ms, timings.bm25_search_ms, timings.fusion_ms, timings.rerank_ms, timings.total_ms,
+        "hybrid_search: embed=%.2fms vector=%.2fms bm25=%.2fms fusion=%.2fms rerank=%.2fms total=%.2fms",
+        timings.embed_query_ms, timings.vector_search_ms, timings.bm25_search_ms,
+        timings.fusion_ms, timings.rerank_ms, timings.total_ms,
     )
     return boost_article_intent(question, ranked)[:top_k]
 
@@ -192,12 +196,12 @@ def boost_article_intent(question: str, ranked: List[RankedDocument]) -> List[Ra
 
 
 def candidate_hits(
-    question: str, store: HybridStore, candidate_k: int
-) -> Tuple[List[Tuple[Document, float]], List[Tuple[Document, float]], Dict[str, List[int]], float, float]:
-    """(parent theo vector, parent theo BM25, parent_id -> child_index trung vector, ms vector, ms bm25)."""
-    vector_start = time.perf_counter()
-    child_hits = _vector_search(store, question, candidate_k * CHILD_FANOUT)
-    vector_ms = (time.perf_counter() - vector_start) * 1000
+    question: str, store: HybridStore, candidate_k: int, timings: Optional[RetrievalTiming] = None
+) -> Tuple[
+    List[Tuple[Document, float]], List[Tuple[Document, float]], Dict[str, List[int]], float, float, float
+]:
+    """(parent vector, parent BM25, parent_id -> child_index trung vector, ms embed, ms FAISS, ms BM25)."""
+    child_hits, embed_ms, vector_ms = _vector_search(store, question, candidate_k * CHILD_FANOUT, timings)
 
     vector_hits: List[Tuple[Document, float]] = []
     matched: Dict[str, List[int]] = {}
@@ -211,7 +215,7 @@ def candidate_hits(
     bm25_start = time.perf_counter()
     bm25_hits = store.bm25_store.search_with_scores(expand_abbreviations(question), top_k=candidate_k)
     bm25_ms = (time.perf_counter() - bm25_start) * 1000
-    return vector_hits[:candidate_k], bm25_hits, matched, vector_ms, bm25_ms
+    return vector_hits[:candidate_k], bm25_hits, matched, embed_ms, vector_ms, bm25_ms
 
 
 def rerank(question: str, store: HybridStore, candidates: List[RankedDocument]) -> List[RankedDocument]:
@@ -245,9 +249,27 @@ def _min_max(values: List[float]) -> List[float]:
     return [(value - low) / spread for value in values]
 
 
-def _vector_search(store: HybridStore, question: str, candidate_k: int) -> List[Tuple[Document, float]]:
+def _vector_search(
+    store: HybridStore,
+    question: str,
+    candidate_k: int,
+    timings: Optional[RetrievalTiming] = None,
+) -> Tuple[List[Tuple[Document, float]], float, float]:
+    """(child hits, ms embed cau hoi, ms FAISS). Tach embed khoi FAISS de do rieng tung buoc.
+
+    `similarity_search_with_score` embed roi tim trong mot lan goi; goi thang
+    `..._by_vector` de do duoc phan embedding (chiem phan lon thoi gian truy xuat
+    cua mot cau hoi).
+    """
     try:
-        return store.vectorstore.similarity_search_with_score(question, k=candidate_k)
+        embed_start = time.perf_counter()
+        embedding = store.vectorstore._embed_query(question)
+        embed_ms = (time.perf_counter() - embed_start) * 1000
+
+        search_start = time.perf_counter()
+        hits = store.vectorstore.similarity_search_with_score_by_vector(embedding, k=candidate_k)
+        vector_ms = (time.perf_counter() - search_start) * 1000
+        return hits, embed_ms, vector_ms
     except Exception as exc:
         raise RuntimeError(
             "Vector search bi loi. Hybrid RAG khong the tiep tuc vi ket qua se sai/lech. "
